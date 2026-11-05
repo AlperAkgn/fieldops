@@ -1,0 +1,43 @@
+{
+  "name": "fieldops",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=24.3.0 <25",
+    "npm": ">=11 <12"
+  },
+  "packageManager": "npm@11.19.0",
+  "scripts": {
+    "web:dev": "npm run dev --workspace=@fieldops/admin-web --",
+    "web:lint": "npm run lint --workspace=@fieldops/admin-web --",
+    "web:typecheck": "npm run typecheck --workspace=@fieldops/admin-web --",
+    "web:build": "npm run build --workspace=@fieldops/admin-web --",
+    "web:test": "npm run test --workspace=@fieldops/admin-web --",
+    "mobile:start": "npm run start --workspace=@fieldops/mobile --",
+    "mobile:lint": "npm run lint --workspace=@fieldops/mobile --",
+    "mobile:typecheck": "npm run typecheck --workspace=@fieldops/mobile --",
+    "mobile:test": "npm run test --workspace=@fieldops/mobile --",
+    "mobile:export": "npm run export --workspace=@fieldops/mobile --",
+    "mobile:check": "npm run check --workspace=@fieldops/mobile --",
+    "mobile:smoke": "npm run smoke --workspace=@fieldops/mobile --",
+    "lint": "npm run lint --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test --workspaces"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "eslint": "10.14.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.5.7",
+    "expo-router": "58.0.30",
+    "globals": "17.14.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.1.0"
+  }
+}

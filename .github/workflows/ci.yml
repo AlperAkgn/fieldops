@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend and PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_DB: fieldops
+          POSTGRES_USER: fieldops
+          POSTGRES_PASSWORD: local_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fieldops -d fieldops"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DOTNET_NOLOGO: 'true'
+      DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+      ConnectionStrings__Database: Host=localhost;Port=5432;Database=fieldops;Username=fieldops;Password=local_ci_only
+      FIELDOPS_TEST_DATABASE: Host=localhost;Port=5432;Database=postgres;Username=fieldops;Password=local_ci_only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          # Same feature band as global.json; CI uses the current servicing patch.
+          dotnet-version: '10.0.403'
+          cache: true
+          cache-dependency-path: backend/**/packages.lock.json
+      - run: dotnet tool restore
+      - run: dotnet restore backend/FieldOps.slnx --locked-mode
+      - run: dotnet build backend/FieldOps.slnx --configuration Release --no-restore
+      - run: dotnet format backend/FieldOps.slnx --verify-no-changes --no-restore
+      - name: Apply the initial migration
+        run: dotnet ef database update --project backend/src/FieldOps.Infrastructure --startup-project backend/src/FieldOps.Api --configuration Release --no-build
+      - name: Unit and integration tests (including real PostgreSQL)
+        run: dotnet test backend/FieldOps.slnx --configuration Release --no-build --logger "trx;LogFilePrefix=fieldops"
+  clients:
+    name: ${{ matrix.client }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        client: [web, mobile]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run ${{ matrix.client }}:lint
+      - run: npm run ${{ matrix.client }}:typecheck
+      - run: npm run ${{ matrix.client }}:test
+      - if: matrix.client == 'web'
+        run: npm run web:build
+      - if: matrix.client == 'mobile'
+        name: Check Expo dependency compatibility
+        run: npx expo install --check
+        working-directory: apps/mobile
+      - if: matrix.client == 'mobile'
+        name: Bundle Android and iOS JavaScript
+        run: npm run mobile:export
+      - if: matrix.client == 'mobile'
+        name: Start Metro and request an Android JavaScript bundle
+        run: npm run mobile:smoke
+
+  infrastructure:
+    name: Docker infrastructure smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Validate local development configuration
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+      - name: Build, migrate, and wait for services
+        run: docker compose up -d --build --wait --wait-timeout 120
+      - name: Probe services and reapply migrations
+        run: |
+          curl --fail http://localhost:5080/health/live
+          curl --fail http://localhost:5080/health/ready
+          curl --fail http://localhost:9000/minio/health/ready
+          docker compose run --rm migrate
+      - name: Inspect failures
+        if: failure()
+        run: docker compose logs --tail=100
+      - name: Stop the disposable CI stack
+        if: always()
+        run: docker compose down --volumes

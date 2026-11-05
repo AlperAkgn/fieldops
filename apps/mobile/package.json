@@ -1,0 +1,29 @@
+{
+  "name": "@fieldops/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "export": "expo export --platform android --platform ios",
+    "check": "expo install --check",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.106.1",
+    "expo": "58.0.23",
+    "expo-constants": "58.0.15",
+    "expo-linking": "58.0.16",
+    "expo-router": "58.0.30",
+    "expo-status-bar": "58.0.4",
+    "react": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-safe-area-context": "5.11.1",
+    "react-native-screens": "4.30.1"
+  }
+}

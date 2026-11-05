@@ -1,0 +1,93 @@
+# Database design
+
+## Implemented foundation versus proposed model
+
+Phase 0 provides PostgreSQL connectivity, an EF Core DbContext, and an initial migration baseline. The baseline has **no application entities**; applying it establishes EF migration history. The model below is the target design for Phases 1–6 and must not be treated as the existing database schema. Create each migration alongside the feature that owns its rules and tests.
+
+## Planned table ownership
+
+| Phase | Tables | Purpose |
+| --- | --- | --- |
+| 1 | Users, Organizations, OrganizationMemberships, OrganizationInvitations, RefreshTokens | Identity, organizational role boundaries, invitations, sessions; Identity may add framework support tables |
+| 2 | Customers, ServiceLocations | Customer records and multiple service sites |
+| 2 | Assets, AssetCategories | Equipment identity, location and service history association |
+| 2 | WorkOrders, WorkOrderAssignments, WorkOrderComments, WorkOrderStatusHistories | Core service workflow and auditable assignment/status activity |
+| 2 | ChecklistTemplates, ChecklistTemplateItems, WorkOrderChecklistItems | Reusable templates and immutable per-order snapshots |
+| 2 | AuditLogs | Durable business audit separate from diagnostic logging |
+| 5 | SyncOperations, SyncChangeRecords | Operation receipts/deduplication and authorized incremental changes/tombstones |
+| 6 | WorkOrderAttachments, Notifications, DeviceRegistrations | Private files, in-app notifications, and push delivery targets |
+
+Add a transactional notification outbox when Phase 6 needs durable post-commit dispatch. Logical names above do not dictate premature tables or migration casing.
+
+## Proposed entity relationships
+
+```mermaid
+erDiagram
+    Users ||--o{ OrganizationMemberships : belongs_through
+    Organizations ||--o{ OrganizationMemberships : contains
+    Organizations ||--o{ OrganizationInvitations : issues
+    Users ||--o{ RefreshTokens : has_sessions
+    Organizations ||--o{ Customers : owns
+    Customers ||--o{ ServiceLocations : has
+    Customers ||--o{ Assets : owns
+    ServiceLocations ||--o{ Assets : contains
+    AssetCategories ||--o{ Assets : classifies
+    Customers ||--o{ WorkOrders : requests
+    ServiceLocations ||--o{ WorkOrders : hosts
+    Assets o|--o{ WorkOrders : optionally_serviced_by
+    WorkOrders ||--o{ WorkOrderAssignments : assigns
+    OrganizationMemberships ||--o{ WorkOrderAssignments : technician
+    WorkOrders ||--o{ WorkOrderComments : has
+    WorkOrders ||--o{ WorkOrderAttachments : has
+    WorkOrders ||--o{ WorkOrderStatusHistories : records
+    ChecklistTemplates ||--o{ ChecklistTemplateItems : defines
+    WorkOrders ||--o{ WorkOrderChecklistItems : snapshots
+    Organizations ||--o{ ChecklistTemplates : owns
+    Organizations ||--o{ AuditLogs : records
+    Organizations ||--o{ SyncOperations : deduplicates
+    Organizations ||--o{ SyncChangeRecords : publishes
+    Users ||--o{ Notifications : receives
+    Users ||--o{ DeviceRegistrations : registers
+```
+
+The diagram omits repeated tenant/actor edges for readability. Tenant IDs, membership checks, and same-customer constraints remain mandatory on every applicable relationship.
+
+## Field contracts
+
+Use UUID primary keys. Tenant-owned records include `TenantId`; `Organizations.Id` is the tenant root. Global Identity users can hold several memberships, uniquely constrained by `(TenantId, UserId)`. Operational timestamps use UTC instants (`timestamptz`); business dates such as installation/warranty expiry use PostgreSQL `date`. Organization settings store a validated IANA timezone identifier.
+
+| Entity | Required product fields, in addition to key/tenant/audit fields |
+| --- | --- |
+| Customer | CustomerType, Name, Email, Phone, Notes, IsActive |
+| ServiceLocation | CustomerId, Name, AddressLine, City, StateOrProvince, Country, PostalCode, optional Latitude/Longitude, ContactName, ContactPhone |
+| Asset | CustomerId, ServiceLocationId, AssetCode, Name, Category/CategoryId, Brand, Model, SerialNumber, InstallationDate, WarrantyExpirationDate, Status, Notes |
+| WorkOrder | WorkOrderNumber, CustomerId, ServiceLocationId, optional AssetId, Title, Description, Priority, Status, PlannedStartAt/EndAt, ActualStartAt/EndAt, CreatedByUserId, Version |
+| WorkOrderAssignment | WorkOrderId, technician membership/user, IsPrimary, AssignedAt, AssignedByUserId, override reason when applicable |
+| WorkOrderComment | WorkOrderId, author, text, visibility, timestamp |
+| WorkOrderChecklistItem | WorkOrderId, stable item ID, copied label/order/required rule, completion state/actor/time, source template/version for provenance |
+| WorkOrderAttachment | WorkOrderId, private object key, safe original name, validated media type/size, checksum, uploader/time, category |
+| AuditLog / status history | Tenant, actor, entity, action/transition, reason, UTC timestamp, safe before/after metadata |
+| SyncOperation | Tenant, actor/device scope, OperationId, entity, operation type, payload fingerprint, result/version, receipt time |
+| SyncChangeRecord | Tenant, monotonically ordered sequence, entity/type, version, audience/scope metadata, tombstone marker |
+
+`CreatedAt` and `UpdatedAt` are server-controlled. Preserve deleted/deactivated actors through stable references and safe display snapshots where retention requires history. Do not cascade-delete work orders, attachments metadata, audit entries, or service history when a customer or membership is archived.
+
+## Tenant integrity and constraints
+
+Every tenant-owned parent exposes an alternate unique key `(TenantId, Id)`. Children use composite foreign keys `(TenantId, ParentId)` so a Company A record cannot reference Company B's ID. Define longer keys where the relationship also requires the same customer: a work order's location must belong to its CustomerId, and an asset must belong to that customer/location. Do not rely only on application validation. EF supports explicit composite principal/foreign keys; see [relationship modeling](https://learn.microsoft.com/en-us/ef/core/modeling/relationships/one-to-many).
+
+Plan unique indexes for `(TenantId, WorkOrderNumber)`, `(TenantId, AssetCode)`, `(TenantId, UserId)` memberships, and active invitation semantics. A partial unique index on `(TenantId, WorkOrderId)` for `IsPrimary` permits at most one primary assignment. Validate exactly one primary when assigned work requires it. Assignments refer to same-tenant active technician memberships rather than any global user ID.
+
+Check constraints cover positive planned intervals, valid actual intervals, bounded coordinates, valid versions, and nonempty required fields. Backend validation supplies useful errors before database enforcement. Future scheduling overlap logic must serialize concurrent assignment/reschedule writes for affected technician memberships, using stable lock ordering and a transaction; a simple check-then-insert without serialization is insufficient. Back-to-back intervals are allowed under `[start,end)` semantics. Manager overrides are explicit and audited.
+
+## Concurrency, reads, and deletion
+
+Use an explicit positive `bigint` Version concurrency token on mutable sync aggregates. Updates include the expected version in the database predicate and atomically increment it; return `409` on mismatch. This keeps the wire contract independent of PostgreSQL internals. EF's [optimistic concurrency documentation](https://learn.microsoft.com/en-us/ef/core/saving/concurrency) explains token comparison at save time.
+
+Add tenant-leading indexes for actual query patterns: work order status/planned time, assignment technician, customer name/search, and change-feed sequence. Use bounded offset pagination for management screens initially and cursor pagination for sync. Allowlisted sorts always include a stable ID tie-breaker. Query projection and integration tests detect accidental N+1 behavior.
+
+Customer DELETE means archive, retaining service history. Define archive visibility explicitly; historical work order references remain readable to authorized users. Sync removal/revocation emits an authorized tombstone or invalidates the device scope; never silently omit a formerly cached record. Cursor/tombstone and idempotency retention policies are finalized and tested in Phase 5 before pruning is enabled.
+
+## Migration and test policy
+
+Run migrations explicitly using the documented local tool; do not use `EnsureCreated` as a replacement. Verify migrations against real PostgreSQL, including empty-database creation, repeat application, pending model changes, constraints, rollback failure behavior, and representative upgrades when feature schema exists. Tests use isolated databases or schemas and never a production connection. Phase 0 cannot validate tenant constraints because tenant tables do not exist yet. See [deployment.md](deployment.md) for executable migration commands.

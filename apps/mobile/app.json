@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "FieldOps",
+    "slug": "fieldops-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "fieldops",
+    "userInterfaceStyle": "light",
+    "plugins": ["expo-router"],
+    "experiments": { "typedRoutes": true },
+    "ios": { "supportsTablet": true, "bundleIdentifier": "com.fieldops.mobile" },
+    "android": { "package": "com.fieldops.mobile" }
+  }
+}

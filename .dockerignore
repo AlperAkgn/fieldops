@@ -1,0 +1,17 @@
+.git
+node_modules
+**/node_modules
+**/bin
+**/obj
+**/dist
+**/.expo
+**/coverage
+**/TestResults
+.env
+.env.*
+**/.env
+**/.env.*
+artifacts
+.vs
+.idea
+

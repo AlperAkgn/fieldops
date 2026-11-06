@@ -1,10 +1,15 @@
 using System.Diagnostics;
+using System.Text.Json.Serialization;
+using FieldOps.Api.Endpoints;
 using FieldOps.Api.Errors;
 using FieldOps.Api.Health;
+using FieldOps.Api.Security;
 using FieldOps.Infrastructure;
 using FieldOps.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.OpenApi;
+using Microsoft.AspNetCore.Authorization;
 
 var migrate = args.Contains("--migrate", StringComparer.Ordinal);
 var builder = WebApplication.CreateBuilder(args.Where(argument => argument != "--migrate").ToArray());
@@ -16,7 +21,40 @@ builder.Services.AddProblemDetails(options =>
         context.ProblemDetails.Extensions["traceId"] =
             Activity.Current?.TraceId.ToString() ?? context.HttpContext.TraceIdentifier);
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer((document, context, ct) =>
+    {
+        document.Components ??= new OpenApiComponents();
+        document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
+        document.Components.SecuritySchemes["Bearer"] = new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "JWT"
+        };
+        return Task.CompletedTask;
+    });
+    options.AddOperationTransformer((operation, context, ct) =>
+    {
+        if (!context.Description.ActionDescriptor.EndpointMetadata.OfType<IAllowAnonymous>().Any())
+        {
+            operation.Security ??= [];
+            operation.Security.Add(new OpenApiSecurityRequirement
+            {
+                [new OpenApiSecuritySchemeReference("Bearer", context.Document)] = []
+            });
+        }
+        return Task.CompletedTask;
+    });
+});
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow;
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false));
+});
+builder.Services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 16_384);
 
 var connectionString = builder.Configuration.GetConnectionString("Database");
 if (string.IsNullOrWhiteSpace(connectionString))
@@ -25,10 +63,11 @@ if (string.IsNullOrWhiteSpace(connectionString))
         "Configure ConnectionStrings__Database using environment variables or .NET user secrets.");
 }
 
-builder.Services.AddInfrastructure(connectionString);
+builder.Services.AddInfrastructure(connectionString, builder.Configuration);
+if (!migrate) builder.Services.AddApiSecurity(builder.Configuration);
 var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
-    policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod()));
+    policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
 var app = builder.Build();
 
@@ -65,6 +104,25 @@ app.UseStatusCodePages(async context =>
     await Results.Problem(statusCode: context.HttpContext.Response.StatusCode)
         .ExecuteAsync(context.HttpContext));
 app.UseCors();
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/api/v1"))
+    {
+        context.Response.Headers.CacheControl = "no-store";
+        if (!app.Environment.IsDevelopment() && !context.Request.IsHttps)
+        {
+            await Results.Problem(statusCode: 400, title: "HTTPS is required.").ExecuteAsync(context);
+            return;
+        }
+    }
+    await next(context);
+});
+app.Use(ApiSecurity.LimitBeforeAuthenticationAsync);
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseRateLimiter();
+app.MapAuthEndpoints();
+app.MapOrganizationEndpoints();
 
 app.MapGet("/health/live", async (HttpContext context, HealthCheckService healthChecks) =>
 {
@@ -74,7 +132,7 @@ app.MapGet("/health/live", async (HttpContext context, HealthCheckService health
     .WithName("GetLiveness")
     .WithTags("Health")
     .WithSummary("Reports whether the API process can answer requests.")
-    .Produces<HealthResponse>();
+    .Produces<HealthResponse>().AllowAnonymous();
 
 app.MapGet("/health/ready", async (HttpContext context, HealthCheckService healthChecks) =>
 {
@@ -85,12 +143,14 @@ app.MapGet("/health/ready", async (HttpContext context, HealthCheckService healt
     .WithTags("Health")
     .WithSummary("Checks PostgreSQL connectivity and that all migrations are applied.")
     .Produces<HealthResponse>()
-    .Produces<HealthResponse>(StatusCodes.Status503ServiceUnavailable);
+    .Produces<HealthResponse>(StatusCodes.Status503ServiceUnavailable).AllowAnonymous();
 
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.MapOpenApi().AllowAnonymous();
 }
+
+app.MapFallback("/{**path}", () => Results.NotFound()).AllowAnonymous().ExcludeFromDescription();
 
 await app.RunAsync();
 

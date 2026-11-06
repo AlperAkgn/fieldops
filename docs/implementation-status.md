@@ -1,16 +1,16 @@
 # Implementation status
 
-Last updated: 2026-11-05 (Europe/Istanbul).
+Last updated: 2026-11-07 (Europe/Istanbul).
 
 ## Authorization boundary
 
-**Phase 0 is complete. Phases 1–8 have not started.** The user requires a stop after each phase. Phase 1 begins only after the user's explicit instruction. This overrides the original master prompt's automatic continuation sentence.
+**Phases 0 and 1 are complete. The final Phase 1 security remediation passed its local quality gate. Phases 2–8 have not started.** Phase 2 requires separate explicit authorization.
 
-## Latest Phase 0 revalidation
+## Phase 0 revalidation (historical)
 
-The comprehensive revalidation and Phase 0 repairs are complete. **PHASE 1 READINESS: READY for the next explicitly authorized development phase.** No Phase 1 code has been added.
+The Phase 0 audit recorded readiness for Phase 1. The Phase 1 section below contains the current implementation and test evidence.
 
-See [Phase 0 validation](phase-0-validation.md) for the fourteen-point audit, exact checks, changed files, fixed defects, environmental blocks, and remaining advisory/maintenance issues. Current evidence supersedes the historical first-run table below:
+The revalidation superseded the historical first-run table below. The audit records the fourteen checks, fixes, environmental blocks and maintenance items. [Phase 0 validation](phase-0-validation.md)
 
 - Windows and clean Linux: Release build/format, actual PostgreSQL tests **21/21** (6 unit + 15 integration), both client lint/typechecks, web build and client tests **23 + 23**. **67 distinct tests passed**, zero skipped.
 - Expo: clean lockfile installation (670 packages), valid peer tree, strict negative compiler probes, Doctor **20/20**, Android/iOS JavaScript export, and real Metro startup/Android manifest/HTTP bundle smoke all passed. Native execution is not claimed.
@@ -24,7 +24,7 @@ See [Phase 0 validation](phase-0-validation.md) for the fourteen-point audit, ex
 | Phase | Status | Scope |
 | --- | --- | --- |
 | 0 | Complete | Foundation and architecture |
-| 1 | Not Started | Identity and multi-tenancy |
+| 1 | Complete | Identity and multi-tenancy |
 | 2 | Not Started | Core domain and API |
 | 3 | Not Started | Admin web dashboard |
 | 4 | Not Started | Technician mobile workflows |
@@ -50,7 +50,7 @@ See [Phase 0 validation](phase-0-validation.md) for the fourteen-point audit, ex
 
 ### Initial implementation evidence (historical)
 
-The first-run checks below were performed locally on 2026-11-05 before the comprehensive audit and repairs. The latest revalidation above is authoritative for current test counts and behavior. Local checks do not establish a hosted CI run or native-device execution.
+The first-run checks below were performed locally on 2026-11-05. The Phase 0 revalidation superseded them. See the Phase 1 section for the current test counts.
 
 | Check / command | Actual result |
 | --- | --- |
@@ -94,29 +94,68 @@ One intermediate Release build overlapped an active testhost and hit a Windows f
 
 ### Known limitations and blockers
 
-- No remaining Phase 0 blocker. Authentication, tenant enforcement, operational workflows, offline persistence, notifications, uploads, and reports are not implemented.
-- No GitHub remote/push/hosted CI run, native device/emulator/simulator test, native build/signing, or cloud deployment was performed. Mobile typechecking, package compatibility, and native-platform JavaScript exports were verified separately.
+- Phase 0 passed its foundation gate. Identity and tenant enforcement were delivered in Phase 1. Operational workflows, offline persistence, notifications, uploads and reports are later phases.
+- The Phase 0 run covered local verification. Hosted CI, native device execution, native build/signing and cloud deployment were outside the observed runs.
 - `npm audit`: **14 moderate findings, 0 high, 0 critical**, propagated from tooling dependencies `minimatch` 10.2.6 ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)) and `glob` 13.0.6 ([GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4)). Expo/ESLint tools constrain these major lines. Force-fix proposed incompatible downgrades; no unsupported override was applied. Track compatible upstream fixes during dependency updates and Phase 7. These are two underlying advisories, not 14 distinct issues.
 - MinIO's upstream is archived; its pinned source build does not establish that transitive dependencies remain maintained. It is local-only.
 - Compose uses local HTTP and a schema-capable development database account. Shared/staging/production TLS, least-privilege roles, secrets, backup/restore, and provider/signing credentials remain future work.
 
 ### Pending tasks and next steps
 
-No authorized Phase 0 implementation task remains. Stop and wait for the user's Phase 1 instruction. Next: Identity/organization/membership mappings, authentication/session lifecycle, invitations, backend policies and tenant boundaries, and real cross-tenant tests.
+The Phase 0 work is complete. The following section records the separately authorized Phase 1 work.
 
 ## Phase 1 — Identity and multi-tenancy
 
-- Completed: none; not started.
-- Pending: Identity, users/organizations/memberships/invitations, initial owner registration, login/JWT, refresh rotation/reuse/logout/revocation, password reset, organization selection, named roles/policies, tenant resolution, account deactivation, last-owner protection, backend tests.
-- Blockers: explicit user authorization; actual email delivery later requires a provider.
-- Verification: not run. Required checks cover ownership/uniqueness transactions, tokens, invitation expiry/reuse, sessions, roles, IDOR and cross-tenant access against PostgreSQL.
-- Next steps: begin only after explicit instruction and preserve Phase 0 checks.
+### Completed tasks
+
+- Added Identity registration and login, JWT access, current-user lookup, email confirmation, password recovery and account deactivation.
+- Added native and web session transport, refresh rotation with replay revocation, logout and session management. Organization switching requires the current refresh credential from the bearer session.
+- Added organization creation, selection and settings, membership roles and status, expiring invitations, resource authorization and transactional last-owner protection.
+- Added migration `20261105205852_IdentityAndOrganizations`, membership-derived tenant context, EF filters and write guards, and composite tenant foreign keys.
+- Added the encrypted SMTP outbox, local Mailpit, deployment configuration and CI coverage. Updated setup, API, security and database documentation.
+
+### Initial verification results (historical)
+
+- Release build and format passed with zero warnings and errors. Locked NuGet restore with full audit passed without advisory warnings.
+- All 98 backend tests passed, comprising 24 unit and 74 integration tests with zero skips. Database cases used real PostgreSQL 18.6 and include replay, CSRF, role and tenant isolation, concurrent membership operations and database constraints.
+- Both migrations applied on PostgreSQL. EF reported no pending model changes and migration reapplication succeeded.
+- Web and mobile lint and strict typechecking passed. All 46 client tests passed. Web production build, Expo dependency validation, Android/iOS export and Android Metro HTTP smoke passed.
+- Local Compose, HTTP health, authentication and SMTP flows passed. CI workflow syntax passed `actionlint`. [Phase 1 verification and source inventory](phase-1-results.md)
+
+### Initial security remediation (historical)
+
+- Preserved the refresh token family across organization switches. Replay revokes descendant access and refresh credentials. PostgreSQL constraints protect lineage integrity.
+- Configured HTTPS for the web development server and Compose API. HTTP web authentication returns safe ProblemDetails. Added a trusted HTTPS smoke test to the Compose CI job.
+- Applied IP quotas before JWT and database session validation. Retained authenticated user quotas for organization and invitation routes.
+- Changed registration to a generic 202 with password setup after mailbox proof. Added control-character validation, route-specific OpenAPI errors and bounded owner lists.
+- Verified 24 unit and 88 integration tests, zero failures or skips. Real PostgreSQL tests covered fresh and populated migrations, tenant isolation, replay, races and selective legacy session revocation. EF reported no pending model changes.
+- Verified Docker HTTPS, CORS, CSRF, real local SMTP, activation, login, refresh, logout and signed-request throttling. Both clients passed lint, strict typecheck and 46 tests in total. Web build, Expo exports and Metro smoke passed.
+
+The initial gate recorded READY. The subsequent independent re-audit reproduced two high-severity issues and one medium-severity issue. [Initial remediation results](phase-1-remediation.md)
+
+### Final security remediation and quality gate
+
+- Selection on both transports now verifies the exact signed session and refresh credential in the user-locked transaction. Replay through either selection route revokes the active family, including the winner of a concurrent switch, while separate sign-ins retain their own families.
+- Login, access validation, refresh and selection require an active account with confirmed email and a password hash. The additive `20261106210629_RevokeUnactivatedAccountSessions` migration revokes legacy sessions for incomplete activation while preserving account, membership and token history.
+- Native and web login reject control characters in email with 400 before database access. Existing Unicode email login remains supported.
+- All original 112 backend tests were retained. The final Release run passed **127 tests** on PostgreSQL 18.6, comprising **24 unit and 103 integration cases**, with zero failures or skips. The legacy invitation test now expects 401 at authentication and still exercises verified acceptance and replay rejection.
+- Locked restore, Release build, format verification, migration model verification, 46 client tests, client lint and typechecks, the web build, Expo exports and Metro smoke passed. The isolated Docker stack applied all four migrations and passed trusted HTTPS and Mailpit authentication smoke.
+
+**Phase 2 readiness is READY.** The default development database was preserved. [Final remediation report, verification and rollout limits](phase-1-final-remediation.md)
+
+### Pending tasks and blockers
+
+The Phase 1 acceptance tasks are complete. External SMTP delivery, hosted CI and native device execution were outside the observed runs. Production throttling and session retention remain hardening tasks.
+
+### Next steps
+
+After Phase 2 authorization, implement the core domain and API using the existing tenant and authorization boundaries. The first slices cover customers, locations and assets before work orders and assignments.
 
 ## Phase 2 — Core domain and API
 
 - Completed: none; not started.
 - Pending: customers/locations/assets, work orders, assignments/overlap/overrides, exact state machine, comments, checklist snapshots/completion, history/audit, validation/pagination/filtering/versions and tenant constraints.
-- Blockers: Phase 1 boundaries and separate user authorization.
+- Blockers: separate user authorization.
 - Verification: not run. Plan unit business-rule/state/concurrency checks and PostgreSQL workflows, relationships, transaction/assignment races and isolation tests.
 - Next steps: implement authorized vertical slices after Phase 1 acceptance.
 

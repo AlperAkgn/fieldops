@@ -9,6 +9,10 @@ node_modules
 **/TestResults
 .env
 .env.*
+.certs
+**/*.pfx
+**/*.p12
+**/*.key
 **/.env
 **/.env.*
 artifacts

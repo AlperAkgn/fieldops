@@ -1,6 +1,6 @@
 # API contracts
 
-## Phase 0 surface
+## Health and development OpenAPI
 
 | Method/path | Purpose | Access |
 | --- | --- | --- |
@@ -8,7 +8,48 @@
 | `GET /health/ready` | PostgreSQL connectivity and zero pending EF migrations | Anonymous, minimal operational output |
 | `GET /openapi/v1.json` | Generated OpenAPI specification | Development environment only |
 
-Health responses use JSON with an aggregate `status`. Liveness returns `{ "status": "Healthy", "checks": [] }`. Readiness returns `{ "status": "Healthy", "checks": [{ "name": "postgresql", "status": "Healthy" }] }` when PostgreSQL is reachable and all migrations are applied. A failed check reports `Unhealthy` and HTTP `503`, without connection strings, exception messages, or stack traces. Probe connections and commands have bounded timeouts; responses include no-store/no-cache headers. Development OpenAPI includes both real GET routes, their typed JSON schemas and readiness 200/503 responses. No identity, tenant, or business endpoints are implemented in Phase 0. Runtime evidence is recorded in [implementation-status.md](implementation-status.md).
+Readiness returns 200 when PostgreSQL is reachable and migrations are current. An unavailable dependency returns 503 and a redacted check status. The liveness probe checks the process independently. Development OpenAPI includes health contracts, Phase 1 routes, and bearer requirements.
+
+## Phase 1 routes
+
+The routes below use the `/api/v1` prefix. Access tokens go in the `Authorization: Bearer` header. JSON requests reject unknown fields. Roles are strings with the values `OrganizationOwner`, `Manager`, `Technician`, and `Viewer`.
+
+| Method and route | Contract |
+| --- | --- |
+| POST `/auth/register` | `email`, `displayName`, `organizationName`, optional `timeZoneId` (default UTC). Returns the same 202 envelope for a new or existing valid email. An eligible request creates the pending account, organization, owner membership and confirmation outbox message together. |
+| POST `/auth/login` | `email`, `password`, optional `organizationId`. Returns a native token pair for an activated account. An email containing control characters returns 400. |
+| POST `/auth/refresh` | `refreshToken`. Returns a new token pair and consumes the previous refresh credential. |
+| GET `/auth/web/csrf` | Returns `token` and the antiforgery cookie over HTTPS. HTTP receives 400. |
+| POST `/auth/web/register` | Same 202 contract as native registration. Requires HTTPS, allowed Origin and `X-CSRF-TOKEN`. |
+| POST `/auth/web/login`, `/auth/web/refresh` | Require HTTPS, allowed Origin and `X-CSRF-TOKEN`. Login uses the same input rules as native login. Refresh reads the cookie. Both return access/session metadata and set a fresh HttpOnly refresh cookie. |
+| POST `/auth/logout`, `/auth/logout-all` | Revoke the current or all owned sessions. Return 204. |
+| POST `/auth/web/logout` | Requires bearer, Origin, antiforgery and a refresh cookie from the same session. Revokes the family and expires that cookie. |
+| GET `/auth/me`, `/auth/sessions` | Current identity, active membership role, and own active sessions. Session listing returns up to 100 entries. |
+| DELETE `/auth/sessions/{id}` | Revoke an owned session by ID. Returns 204. |
+| POST `/auth/forgot-password`, `/auth/request-email-confirmation` | `email`. Returns the same 202 envelope for any valid address. Eligible requests enqueue mail. |
+| POST `/auth/reset-password` | `userId`, `token`, `newPassword`. Returns 204 and revokes all account sessions on success. |
+| POST `/auth/confirm-email` | `userId`, `token`, `password`. Confirms the address and sets the password in one transaction. Returns 204 on success. Sign in afterwards. |
+| POST `/auth/deactivate` | Deactivates the authenticated account and revokes its sessions. Last active owners receive 409. |
+| GET / POST `/organizations` | List the caller's active memberships or create an organization with the caller as owner. Creation requires confirmed email and accepts `name`, `timeZoneId`. |
+| GET / PATCH `/organizations/{id}` | Read the active organization or update `name` and/or `timeZoneId` as an owner. |
+| POST `/organizations/{id}/select` | Native membership switch with bearer and a current `{ "refreshToken": "…" }` from the same session. Consumes the credential and replaces the tenant-bound session inside the same family. |
+| POST `/auth/web/organizations/{id}/select` | Web membership switch with bearer, Origin, antiforgery and the current refresh cookie from the same session. |
+| GET `/organizations/{id}/members` | Owner-only membership listing within the active organization. |
+| PATCH `/organizations/{id}/members/{membershipId}/role` | Owner-only `role` change. |
+| POST `/organizations/{id}/members/{membershipId}/deactivate` or `/reactivate` | Owner-only activation changes. Deactivation revokes affected sessions. |
+| GET / POST `/organizations/{id}/invitations` | Owner-only list and create with `email`, `role`. Creation requires confirmed email. Returns invitation metadata. |
+| DELETE `/organizations/{id}/invitations/{invitationId}` | Revoke a pending invitation. |
+| POST `/invitations/accept` | Authenticated intended recipient with confirmed email submits `token`. Returns the joined organization. |
+
+Use credentials-enabled requests for the web cookie routes. In local development, use `https://localhost:5173` for the web client and `https://localhost:5443` for the API. Both origins use HTTPS and the same hostname for SameSite=Strict cookies. Obtain an anonymous antiforgery token for registration, login, and refresh. Obtain an antiforgery token with the current bearer header for protected web logout or organization selection. Web access tokens belong in memory. Native refresh credentials are intended for SecureStore when the mobile sign-in flow is implemented.
+
+Serialize refresh and organization selection requests within a client session. Reusing the consumed credential with its matching signed bearer on a selection route revokes the session family and returns 401. A subsequent request with access or refresh credentials from that family also returns 401.
+
+Member and invitation lists return arrays with `offset` (default 0) and `limit` (default 50, maximum 100). Request subsequent pages by increasing the offset by the number of returned entries. A short page marks the end of the result set.
+
+The generated Phase 1 OpenAPI describes the applicable ProblemDetails responses. Throttled requests return 429 and a `Retry-After` delay in seconds.
+
+An ordinary registration opens an organization. An invitation is accepted from a signed-in, verified account. Email messages supply the values for confirmation, reset, and invitation acceptance. The local inbox is available through Mailpit. [Local setup](deployment.md)
 
 ## Planned conventions
 
@@ -31,19 +72,10 @@ Choose `400` for ordinary validation and `409` for current-state business confli
 
 ## Planned endpoint/policy map
 
-Every group below is **not implemented in Phase 0**. Policy names describe intended requirements, not existing policy registrations.
+The remaining groups are planned for later phases.
 
 | Group and routes | Minimum policy and resource constraint | Phase |
 | --- | --- | --- |
-| `POST /auth/register`, `/auth/login`, `/auth/forgot-password`, `/auth/reset-password` | Anonymous, validated and rate limited; non-enumerating responses | 1 |
-| `POST /auth/refresh` | Valid rotating session credential, reuse detection, CSRF protection for cookie mode | 1 |
-| `POST /auth/logout`, `GET /auth/me` | Authenticated session; revoke/inspect own session only | 1 |
-| `GET /organizations`, `POST /organizations` | Authenticated user; list own active memberships; creator becomes owner atomically | 1 |
-| `POST /organizations/{id}/select` | Active membership in selected organization; issue validated tenant context | 1 |
-| `GET /organizations/{id}`, `/organizations/{id}/members` | Active membership; member-detail visibility limited by permission | 1 |
-| `PATCH /organizations/{id}`, membership role/deactivation commands | OrganizationOwner; preserve at least one active owner | 1 |
-| `POST /organizations/{id}/invitations` | OrganizationOwner; scoped role grant, expiry, hashed single-use token | 1 |
-| `POST /invitations/accept` | Authenticated intended verified email; valid unconsumed token; membership transaction | 1 |
 | `GET /customers`, `/customers/{id}` | OperationalRead in active tenant | 2 |
 | `POST /customers`, `PATCH /customers/{id}`, `DELETE /customers/{id}` | OperationalWrite (Owner/Manager); DELETE archives | 2 |
 | `GET /service-locations`, `/service-locations/{id}`; `POST /service-locations`; `PATCH /service-locations/{id}` | Scoped read or OperationalWrite, valid same-tenant customer | 2 |

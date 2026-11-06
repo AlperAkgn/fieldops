@@ -11,6 +11,7 @@ RUN apt-get update \
     && apt-get install --yes --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+RUN mkdir /keys && chown $APP_UID:$APP_UID /keys
 COPY --from=build /app/publish ./
 USER $APP_UID
 ENV ASPNETCORE_HTTP_PORTS=8080

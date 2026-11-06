@@ -13,6 +13,7 @@ artifacts/
 # Local configuration and credentials
 .env
 .env.*
+.certs/
 !.env.example
 !**/.env.example
 *.user

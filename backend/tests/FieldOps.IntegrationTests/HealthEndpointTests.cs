@@ -69,6 +69,59 @@ public sealed class HealthEndpointTests
     }
 
     [Fact]
+    public async Task OpenApiDistinguishesProtectedRoutesAndNativeVersusWebCredentials()
+    {
+        await using var factory = new ApiFactory();
+        using var response = await factory.CreateClient().GetAsync("/openapi/v1.json");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = document.RootElement;
+        var paths = root.GetProperty("paths");
+        foreach (var path in new[] { "/api/v1/auth/register", "/api/v1/auth/web/register", "/api/v1/organizations/{id}/invitations" })
+        {
+            var registration = path.EndsWith("/register", StringComparison.Ordinal);
+            Assert.True(paths.GetProperty(path).GetProperty("post").GetProperty("responses").TryGetProperty(registration ? "202" : "201", out _));
+        }
+        var me = paths.GetProperty("/api/v1/auth/me").GetProperty("get");
+        Assert.True(me.GetProperty("security")[0].TryGetProperty("Bearer", out _));
+        var login = paths.GetProperty("/api/v1/auth/login").GetProperty("post");
+        Assert.False(login.TryGetProperty("security", out var loginSecurity) && loginSecurity.GetArrayLength() > 0);
+        var health = paths.GetProperty("/health/live").GetProperty("get");
+        Assert.False(health.TryGetProperty("security", out var healthSecurity) && healthSecurity.GetArrayLength() > 0);
+        var nativeReference = login.GetProperty("responses").GetProperty("200").GetProperty("content")
+            .GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString()!;
+        var webReference = paths.GetProperty("/api/v1/auth/web/login").GetProperty("post")
+            .GetProperty("responses").GetProperty("200").GetProperty("content")
+            .GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString()!;
+        var schemas = root.GetProperty("components").GetProperty("schemas");
+        Assert.True(schemas.GetProperty(nativeReference.Split('/')[^1]).GetProperty("properties").TryGetProperty("refreshToken", out _));
+        Assert.False(schemas.GetProperty(webReference.Split('/')[^1]).GetProperty("properties").TryGetProperty("refreshToken", out _));
+    }
+
+    [Fact]
+    public async Task OpenApiDocumentsOnlyApplicableProblemResponses()
+    {
+        await using var factory = new ApiFactory();
+        using var response = await factory.CreateClient().GetAsync("/openapi/v1.json");
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var paths = document.RootElement.GetProperty("paths");
+        AssertProblems("/api/v1/auth/register", "post", ["400", "429"], ["401", "403", "404", "409"]);
+        AssertProblems("/api/v1/auth/web/login", "post", ["400", "401", "403", "429"], ["404", "409"]);
+        AssertProblems("/api/v1/organizations/{id}/members/{membershipId}/role", "patch",
+            ["400", "401", "403", "404", "409", "429"], []);
+        AssertProblems("/health/live", "get", [], ["400", "401", "403", "404", "409", "429"]);
+
+        void AssertProblems(string path, string method, string[] expected, string[] absent)
+        {
+            var responses = paths.GetProperty(path).GetProperty(method).GetProperty("responses");
+            foreach (var status in expected)
+                Assert.True(responses.GetProperty(status).GetProperty("content").TryGetProperty("application/problem+json", out _));
+            foreach (var status in absent)
+                Assert.False(responses.TryGetProperty(status, out _));
+        }
+    }
+
+    [Fact]
     public async Task ReadinessTimesOutWhenDatabaseAcceptsButNeverResponds()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);

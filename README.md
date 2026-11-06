@@ -2,7 +2,7 @@
 
 Manage field operations, empower technicians, and keep every service job under control.
 
-FieldOps is a planned multi-tenant field service management platform for businesses that coordinate technicians, customers, service locations, equipment, and maintenance work. This repository currently contains **Phase 0: Foundation and Architecture**. Authentication, tenant data, business workflows, and offline synchronization are planned features, not available product capabilities.
+FieldOps is a multi-tenant field service management platform in development. Phase 1 adds authentication, sessions, organizations, memberships, and invitations to the Phase 0 foundation. Customer and work order workflows begin in Phase 2.
 
 ## Problem and product scope
 
@@ -12,13 +12,15 @@ The first release targets general field service operations rather than a single 
 
 ## What works today
 
-- A four-layer .NET 10 solution with an API, EF Core PostgreSQL integration, and an initial migration baseline.
+- A four-layer .NET 10 API with ASP.NET Core Identity and EF Core migrations for PostgreSQL.
+- Registration with initial organization ownership, JWT access, rotating refresh tokens, session revocation, and email confirmation and recovery.
+- Membership-scoped organization management, owner policies, invitations, and cross-tenant database constraints.
 - Separate process liveness and database/migration readiness endpoints, structured JSON logs, safe ProblemDetails responses, and development OpenAPI.
 - Strict TypeScript React/Vite and Expo Router applications that inspect the real API health, report loading/errors, and allow retry.
-- Local PostgreSQL, API, explicit migration job, and MinIO services using Docker Compose.
+- Local PostgreSQL, API, migration job, Mailpit email capture, and MinIO using Docker Compose.
 - Locked dependencies, backend architecture/health/database tests, client transport tests, and a GitHub Actions workflow.
 
-Implementation evidence and limitations are maintained in [implementation status](docs/implementation-status.md). Subsequent phases require explicit user authorization; Phase 1 does not start automatically.
+Implementation evidence and phase gates are tracked in [implementation status](docs/implementation-status.md).
 
 ## Technology stack
 
@@ -32,7 +34,7 @@ Implementation evidence and limitations are maintained in [implementation status
 | Verification | xUnit, ASP.NET Core test host, real PostgreSQL, Vitest, ESLint, TypeScript |
 | CI | GitHub Actions with separate backend, web, and mobile jobs |
 
-Exact package versions are in `package.json`, the application manifests, project files, and lockfiles. Expo native versions follow the [official SDK compatibility matrix](https://docs.expo.dev/versions/latest/). Vite's [Node requirements](https://vite.dev/guide/) and Npgsql's [EF Core 10 support](https://www.npgsql.org/efcore/release-notes/10.0.html) were checked. Feature-specific libraries such as Identity, notifications, SQLite, SignalR, forms, charts, and file-storage integrations will be introduced in the phases that use them.
+Exact package versions are in the application manifests, project files, and lockfiles. See the [Expo SDK compatibility matrix](https://docs.expo.dev/versions/latest/), [Vite Node requirements](https://vite.dev/guide/), and [Npgsql EF Core 10 support](https://www.npgsql.org/efcore/release-notes/10.0.html).
 
 MinIO's community repository is archived. The local image is built from its pinned final source-only security release; this is a local-development decision subject to review before file uploads. See [ADR 0002](docs/adr/0002-local-object-storage.md).
 
@@ -50,7 +52,7 @@ flowchart LR
     Infrastructure -. Phase 6 .-> Storage[S3-compatible storage]
 ```
 
-The backend is a modular monolith. Domain remains independent of EF Core, HTTP, and UI frameworks. Application defines use cases; Infrastructure supplies persistence and future integrations; API composes them. Phase 0 deliberately leaves the Domain/Application projects without speculative entities or handlers. [Architecture](docs/architecture.md) and [ADR 0001](docs/adr/0001-architecture.md) describe module boundaries and future cross-cutting decisions.
+The backend is a modular monolith. Domain owns organization and session rules. Application defines use-case contracts. Infrastructure implements Identity, persistence, and mail delivery. API composes authentication, policies, and HTTP endpoints. [Architecture](docs/architecture.md)
 
 ```text
 apps/
@@ -70,42 +72,45 @@ docker-compose.yml            Local infrastructure and migration job
 
 Install a current .NET **10.0.4xx** SDK patch (minimum **10.0.401**), Node **24.21.0**, npm **11.x**, and Docker with the Linux engine running. `global.json` allows patch updates within that SDK feature band; Docker and CI use SDK **10.0.403** and the API container uses runtime **10.0.14**. Node is pinned in `.nvmrc`.
 
-1. Copy `.env.example` to `.env` and choose local database/storage passwords.
-2. Start the infrastructure and apply the initial migration:
+1. Copy `.env.example` to `.env`, choose local database/storage passwords, and set `JWT_SIGNING_KEY` to 32 random bytes encoded as 64 hex characters. Generate a value with `openssl rand -hex 32` or `[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))` in PowerShell 7.
+2. Export and trust the localhost development certificate. Set its export password in the root `.env`. [Certificate setup](docs/deployment.md#local-https-certificate)
+3. Start the infrastructure and apply migrations.
 
    ```sh
    docker compose up -d --build --wait
    ```
 
-3. Check the actual API and install client dependencies:
+4. Check the actual API and install client dependencies.
 
    ```sh
-   curl --fail http://localhost:5080/health/live
-   curl --fail http://localhost:5080/health/ready
+   curl --fail https://localhost:5443/health/live
+   curl --fail https://localhost:5443/health/ready
    npm ci
    npm run web:dev
    ```
 
-4. In another terminal, run `npm run mobile:start`. Configure a device-reachable API URL as described below.
+5. In another terminal, run `npm run mobile:start`. Configure a device-reachable API URL as described below.
 
 PowerShell equivalents: `Copy-Item .env.example .env` and `Invoke-RestMethod http://localhost:5080/health/ready`. The initial MinIO source build downloads Go modules and takes a few minutes. A completed `migrate` container with exit code 0 is expected. [The deployment guide](docs/deployment.md) explains host-run API development, ports, lifecycle, and troubleshooting.
 
 | Local address | Service |
 | --- | --- |
-| `http://localhost:5173` | Web foundation screen |
+| `https://localhost:5173` | Web foundation screen |
+| `https://localhost:5443` | API and web authentication |
 | `http://localhost:5080/health/live` | API process liveness |
 | `http://localhost:5080/health/ready` | PostgreSQL and migration readiness |
 | `http://localhost:5080/openapi/v1.json` | OpenAPI JSON in Development |
 | `localhost:5432` | PostgreSQL |
+| `http://localhost:8025` | Local Mailpit inbox |
 | `http://localhost:9000` / `http://localhost:9001` | MinIO S3 / console |
 
 ## Environment configuration
 
-Root `.env` is for Docker Compose. Vite and Expo read their own application-local files:
+Docker Compose and the Vite development server share the certificate settings in the root `.env`. Public URL overrides go in the application-local files.
 
 ```text
 # apps/admin-web/.env.local
-VITE_API_BASE_URL=http://localhost:5080
+VITE_API_BASE_URL=https://localhost:5443
 
 # apps/mobile/.env.local — use your host LAN address on a physical phone
 EXPO_PUBLIC_API_BASE_URL=http://192.168.1.100:5080
@@ -115,7 +120,7 @@ API URLs must be HTTP(S) origins, optionally ending in `/`, with no credentials,
 
 ## Database and migrations
 
-The current database contains only `__EFMigrationsHistory`. The intentionally empty `InitialFoundation` baseline establishes the migration pipeline without implementing future phases. The proposed [database model and ERD](docs/database.md) are a design for later phases, not the deployed Phase 0 schema.
+The migration chain starts at `InitialFoundation`, adds the identity schema in `IdentityAndOrganizations`, and links refresh sessions across organization changes in `RefreshSessionLineage`. [Database design](docs/database.md)
 
 Compose runs an explicit migration job before starting the API. To reapply migrations manually:
 
@@ -123,7 +128,7 @@ Compose runs an explicit migration job before starting the API. To reapply migra
 docker compose run --rm migrate
 ```
 
-For host development, configure `ConnectionStrings__Database`, then run:
+For host development, configure `ConnectionStrings__Database` and `Jwt__SigningKey`, then run:
 
 ```sh
 dotnet tool restore
@@ -155,9 +160,7 @@ Set `FIELDOPS_TEST_DATABASE` to a disposable local PostgreSQL administrative con
 
 ## API documentation and security
 
-Only `/health/live`, `/health/ready`, and development `/openapi/v1.json` exist in Phase 0. See [API contracts](docs/api.md) for current responses and planned `/api/v1` routes. Business endpoints, authentication, and authorization are not implemented yet.
-
-The [security design](docs/security.md) defines membership-verified tenants, backend authorization, tenant-aware relationships, refresh-token rotation, secure session storage, and cross-tenant test requirements for later phases. Current safeguards include redacted error responses, an explicit CORS allowlist, ignored local secrets, and restricted local infrastructure ports. This local foundation is not a production security claim.
+Development OpenAPI describes the health probes and Phase 1 routes. The native transport returns an opaque refresh credential in JSON. The web transport uses a secure HttpOnly cookie, explicit Origin validation, and antiforgery. Both use a bearer access token for authenticated API requests. [API contracts](docs/api.md) · [Security design](docs/security.md)
 
 ## Planned offline synchronization
 
@@ -171,7 +174,7 @@ The current applications display technical foundation health. Product screenshot
 
 | Phase | Deliverable |
 | --- | --- |
-| 0 | Foundation and architecture — current authorized phase |
+| 0 | Foundation and architecture |
 | 1 | Identity, organizations, memberships, invitations, secure tenant boundaries |
 | 2 | Customers, locations, assets, work orders, assignments, checklists, audit |
 | 3 | Admin web workflows connected to real APIs |

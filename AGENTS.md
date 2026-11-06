@@ -14,7 +14,7 @@ Read this file, `docs/development-roadmap.md`, and `docs/implementation-status.m
 - Dependencies point inward. Domain has no framework dependency; Application depends on Domain; Infrastructure implements application interfaces; API is the composition root.
 - Phase 0 provides runnable API/database health, an initial infrastructure-only migration, minimal React/Expo foundation screens, Docker, CI, and the complete implementation plan. Identity, organizations, tenant entities, operational APIs, and business dashboards belong to later phases.
 - Do not add speculative repositories, CQRS frameworks, Redis, microservices, or unimplemented UI actions.
-- Shared database/schema tenancy is planned. In subsequent phases, resolve tenant from authenticated membership, enforce resource authorization and composite tenant foreign keys, and test isolation against real PostgreSQL.
+- Use shared database/schema tenancy. Resolve the tenant from authenticated membership, enforce resource authorization and composite tenant foreign keys, and test isolation against real PostgreSQL.
 
 ## Engineering conventions
 

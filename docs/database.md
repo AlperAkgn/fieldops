@@ -2,7 +2,17 @@
 
 ## Implemented foundation versus proposed model
 
-Phase 0 provides PostgreSQL connectivity, an EF Core DbContext, and an initial migration baseline. The baseline has **no application entities**; applying it establishes EF migration history. The model below is the target design for Phases 1–6 and must not be treated as the existing database schema. Create each migration alongside the feature that owns its rules and tests.
+The `InitialFoundation` migration establishes EF migration history. `20261105205852_IdentityAndOrganizations` adds `AspNetUsers` and its Identity support tables, `Organizations`, `OrganizationMemberships`, `OrganizationInvitations`, `AuthSessions`, `RefreshCredentials`, and `OutboundEmails`. The target diagram below also includes tables from later phases.
+
+Memberships have alternate keys on `(TenantId, Id)` and `(TenantId, UserId)`. Invitation issuer and recipient membership references use the first key. Session membership references use the second. Pending invitations have a partial unique index per tenant and normalized email. Email outbox bodies are protected by ASP.NET Core Data Protection.
+
+`RefreshSessionLineage` adds a family ID to sessions and refresh credentials. A session references a root from the same user. A refresh credential references a session from the same family, and a replacement credential must belong to that family. A unique replacement index and check constraint prevent two predecessors pointing to one replacement, self-replacement and incomplete consumption metadata.
+
+The lineage upgrade backfills the existing rows and retains users, organizations, memberships, sessions and token hashes. Earlier switches did not record their successors. The upgrade revokes active sessions for accounts with a recorded legacy organization switch and requires those users to sign in again. It refuses downgrade because removing family data reopens the replay flaw.
+
+The forward-only `20261106210629_RevokeUnactivatedAccountSessions` data migration also works on databases where lineage is already applied. It marks unexpired, unrevoked sessions for accounts with unconfirmed email or a missing password hash as `account_activation_required`. Their refresh credentials are unusable through the revoked parent sessions. Accounts, tenant relationships, token hashes and lineage remain available, and the migration preserves earlier revocations and sessions of activated accounts.
+
+Keep a verified pre-upgrade database backup and Data Protection key ring. Rehearse restoration and the full migration chain on a separate database. During rollout, stop the old API from accepting writes, run the migration from the updated image, then start that API and verify readiness, data counts and the intended session revocations. The data migration refuses downgrade to avoid restoring revoked credentials. Use a forward fix or the coordinated backup restore procedure if recovery is required. The earlier Identity migration's down operation drops application tables and belongs only on disposable data.
 
 ## Planned table ownership
 

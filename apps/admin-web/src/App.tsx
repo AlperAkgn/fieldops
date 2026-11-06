@@ -5,7 +5,7 @@ import type { HealthEndpoint } from './api/health';
 import { messages as t } from './i18n/en';
 
 const apiBaseUrl = (() => {
-  try { return getApiOrigin(import.meta.env.VITE_API_BASE_URL || 'http://localhost:5080'); }
+  try { return getApiOrigin(import.meta.env.VITE_API_BASE_URL || 'https://localhost:5443'); }
   catch { return ''; }
 })();
 

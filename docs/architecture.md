@@ -2,7 +2,7 @@
 
 ## Status and context
 
-This document records the accepted architecture and the planned product boundaries. Phase 0 establishes the solution, client shells, persistence/migration infrastructure, health endpoints, local containers, and CI. Identity, multi-tenant enforcement, domain workflows, offline synchronization, and integrations are designs for later phases. Verification evidence belongs in [implementation-status.md](implementation-status.md).
+Phase 0 establishes the solution, client shells, persistence, health endpoints, containers, and CI. Phase 1 adds identity, organization membership, invitations, and session enforcement. The next domain slice builds on those tenant boundaries. [Implementation status](implementation-status.md)
 
 ## System and dependency direction
 

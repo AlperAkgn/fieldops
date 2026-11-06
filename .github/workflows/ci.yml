@@ -37,6 +37,7 @@ jobs:
       DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
       ConnectionStrings__Database: Host=localhost;Port=5432;Database=fieldops;Username=fieldops;Password=local_ci_only
       FIELDOPS_TEST_DATABASE: Host=localhost;Port=5432;Database=postgres;Username=fieldops;Password=local_ci_only
+      Jwt__SigningKey: ci_test_only_key_not_for_deployment_0123456789_abcdefghijklmnopqrstuv
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
@@ -49,7 +50,7 @@ jobs:
       - run: dotnet restore backend/FieldOps.slnx --locked-mode
       - run: dotnet build backend/FieldOps.slnx --configuration Release --no-restore
       - run: dotnet format backend/FieldOps.slnx --verify-no-changes --no-restore
-      - name: Apply the initial migration
+      - name: Apply database migrations
         run: dotnet ef database update --project backend/src/FieldOps.Infrastructure --startup-project backend/src/FieldOps.Api --configuration Release --no-build
       - name: Unit and integration tests (including real PostgreSQL)
         run: dotnet test backend/FieldOps.slnx --configuration Release --no-build --logger "trx;LogFilePrefix=fieldops"
@@ -90,9 +91,22 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Validate local development configuration
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          dotnet-version: '10.0.403'
+      - name: Configure disposable local stack
         run: |
           cp .env.example .env
+          printf 'JWT_SIGNING_KEY=%s\n' "$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          mkdir .certs
+          cert_password="$(openssl rand -hex 24)"
+          echo "::add-mask::$cert_password"
+          printf 'FIELDOPS_HTTPS_CERT_PASSWORD=%s\n' "$cert_password" >> "$GITHUB_ENV"
+          dotnet dev-certs https -ep .certs/fieldops.pfx -p "$cert_password"
+          dotnet dev-certs https -ep .certs/fieldops.crt --format PEM
+          chmod 644 .certs/fieldops.pfx
+      - name: Validate Compose configuration
+        run: |
           docker compose config --quiet
       - name: Build, migrate, and wait for services
         run: docker compose up -d --build --wait --wait-timeout 120
@@ -102,6 +116,8 @@ jobs:
           curl --fail http://localhost:5080/health/ready
           curl --fail http://localhost:9000/minio/health/ready
           docker compose run --rm migrate
+      - name: Exercise HTTPS web authentication and Mailpit
+        run: python3 infrastructure/scripts/smoke-web-auth.py --ca .certs/fieldops.crt
       - name: Inspect failures
         if: failure()
         run: docker compose logs --tail=100

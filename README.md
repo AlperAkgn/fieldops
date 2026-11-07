@@ -2,7 +2,7 @@
 
 Manage field operations, empower technicians, and keep every service job under control.
 
-FieldOps is a multi-tenant field service management platform in development. Phase 1 adds authentication, sessions, organizations, memberships, and invitations to the Phase 0 foundation. Customer and work order workflows begin in Phase 2.
+FieldOps is a multi-tenant field service management platform in development. Phase 2 adds customers, service locations, assets and work orders to the verified identity and organization foundation. The web dashboard milestone is Phase 3.
 
 ## Problem and product scope
 
@@ -15,6 +15,10 @@ The first release targets general field service operations rather than a single 
 - A four-layer .NET 10 API with ASP.NET Core Identity and EF Core migrations for PostgreSQL.
 - Registration with initial organization ownership, JWT access, rotating refresh tokens, session revocation, and email confirmation and recovery.
 - Membership-scoped organization management, owner policies, invitations, and cross-tenant database constraints.
+- Customer, service location, asset category and asset management with archive semantics and paged queries.
+- Versioned work orders, schedules, primary and additional technician assignments, availability checks and audited overrides.
+- Central status transitions, comments with restricted internal visibility, immutable checklist snapshots and completion rules.
+- Tenant-scoped business audit, composite relationship constraints and PostgreSQL transaction tests.
 - Separate process liveness and database/migration readiness endpoints, structured JSON logs, safe ProblemDetails responses, and development OpenAPI.
 - Strict TypeScript React/Vite and Expo Router applications that inspect the real API health, report loading/errors, and allow retry.
 - Local PostgreSQL, API, migration job, Mailpit email capture, and MinIO using Docker Compose.
@@ -120,7 +124,7 @@ API URLs must be HTTP(S) origins, optionally ending in `/`, with no credentials,
 
 ## Database and migrations
 
-The migration chain starts at `InitialFoundation`, adds the identity schema in `IdentityAndOrganizations`, and links refresh sessions across organization changes in `RefreshSessionLineage`. [Database design](docs/database.md)
+The migration chain starts at `InitialFoundation`, adds and secures identity through the Phase 1 migrations, and adds the twelve operational tables in `CoreOperations`. Review the existing database before upgrading it. [Database design](docs/database.md) · [Phase 2 rollout plan](docs/phase-2-migration-plan.md)
 
 Compose runs an explicit migration job before starting the API. To reapply migrations manually:
 
@@ -160,7 +164,7 @@ Set `FIELDOPS_TEST_DATABASE` to a disposable local PostgreSQL administrative con
 
 ## API documentation and security
 
-Development OpenAPI describes the health probes and Phase 1 routes. The native transport returns an opaque refresh credential in JSON. The web transport uses a secure HttpOnly cookie, explicit Origin validation, and antiforgery. Both use a bearer access token for authenticated API requests. [API contracts](docs/api.md) · [Security design](docs/security.md)
+Development OpenAPI describes health, identity and operational routes. The native transport returns an opaque refresh credential in JSON. The web transport uses a secure HttpOnly cookie, explicit Origin validation, and antiforgery. Both use a bearer access token for authenticated API requests. [API contracts](docs/api.md) · [Security design](docs/security.md)
 
 ## Planned offline synchronization
 

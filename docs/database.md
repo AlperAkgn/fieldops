@@ -2,7 +2,17 @@
 
 ## Implemented foundation versus proposed model
 
-The `InitialFoundation` migration establishes EF migration history. `20261105205852_IdentityAndOrganizations` adds `AspNetUsers` and its Identity support tables, `Organizations`, `OrganizationMemberships`, `OrganizationInvitations`, `AuthSessions`, `RefreshCredentials`, and `OutboundEmails`. The target diagram below also includes tables from later phases.
+The `InitialFoundation` migration establishes EF migration history. The Phase 1 migrations add and secure identity, organizations, memberships, invitations, refresh sessions and the mail outbox. `20261107100957_CoreOperations` adds twelve operational tables covering customers, locations, assets and categories, work orders, assignments, status history, checklist templates and items, work-order snapshots, comments and audit logs. The target diagram below also includes tables from later phases.
+
+Phase 2 references use composite tenant foreign keys. Work orders reference a location within their customer and an asset within that customer/location pair. Snapshot source items must belong to the recorded tenant and template. Relationship and audit foreign keys use restrictive deletion so archiving retains service history.
+
+Mutable aggregates use positive bigint versions. API mutations compare the expected version while holding the organization row lock, then EF includes the original version in the update predicate. Assignments use filtered unique indexes for an active technician per work order and at most one active primary. Required-item and exact-primary checks run in the serialized transaction. Availability checks use half-open intervals within the active tenant. Status history, audit and business data commit together.
+
+The CoreOperations migration refuses downgrade because dropping its tables would discard operational and audit history. The default development database rollout follows the documented backup and rehearsal sequence. [Phase 2 migration plan](phase-2-migration-plan.md)
+
+The audit remediation adds a nullable jsonb `AuditLogs.Metadata` column. Scheduling and assignment records contain previous/current values for changed planned instants, technician IDs and the primary technician, together with previous and resulting entity versions. Actor, timestamp and override reason remain in their existing columns. Legacy rows retain null metadata because their earlier values were never recorded.
+
+EF rejects changes and deletes to tracked audit records. A PostgreSQL statement trigger also rejects UPDATE, DELETE and TRUNCATE. The migration refuses downgrade to preserve captured metadata and append-only protection. Apply this upgrade through the same backup and isolated rehearsal process. Database schema-administrator privileges remain the boundary for changing these protections.
 
 Memberships have alternate keys on `(TenantId, Id)` and `(TenantId, UserId)`. Invitation issuer and recipient membership references use the first key. Session membership references use the second. Pending invitations have a partial unique index per tenant and normalized email. Email outbox bodies are protected by ASP.NET Core Data Protection.
 

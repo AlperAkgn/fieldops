@@ -2,6 +2,7 @@ using System.Diagnostics;
 using FieldOps.Application.Common;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace FieldOps.Api.Errors;
 
@@ -15,6 +16,8 @@ public sealed partial class GlobalExceptionHandler(
         CancellationToken cancellationToken)
     {
         var failure = exception as FieldOpsException;
+        if (exception is DbUpdateConcurrencyException)
+            failure = new FieldOpsException(ErrorKind.Conflict, "stale_version", "The resource changed. Reload it before retrying.");
         var status = failure?.Kind switch
         {
             ErrorKind.Validation => 400,

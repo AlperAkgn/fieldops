@@ -2,7 +2,7 @@
 
 ## Status and context
 
-Phase 0 establishes the solution, client shells, persistence, health endpoints, containers, and CI. Phase 1 adds identity, organization membership, invitations, and session enforcement. The next domain slice builds on those tenant boundaries. [Implementation status](implementation-status.md)
+Phase 0 establishes the solution, client shells, persistence, health endpoints, containers, and CI. Phase 1 adds identity, organization membership, invitations, and session enforcement. Phase 2 builds the catalog, work orders and audit on those tenant boundaries. [Implementation status](implementation-status.md)
 
 ## System and dependency direction
 
@@ -25,10 +25,10 @@ API is the composition root and the single deployable backend. Infrastructure de
 
 | Project | Responsibility |
 | --- | --- |
-| `FieldOps.Domain` | Future aggregates, value objects, state transitions, invariants, domain errors/events when useful |
-| `FieldOps.Application` | Future use cases, DTOs, validation, actor/tenant/resource requirements, provider interfaces |
-| `FieldOps.Infrastructure` | PostgreSQL/EF Core, migrations, provider implementations; Identity/storage/notifications later |
-| `FieldOps.Api` | HTTP contracts, composition/configuration, safe errors, logging, health/OpenAPI; authentication/policies/hubs later |
+| `FieldOps.Domain` | Catalog and work-order aggregates, checklist snapshots, state transitions and invariants |
+| `FieldOps.Application` | Use-case interfaces, DTOs, pagination and tenant/actor contracts |
+| `FieldOps.Infrastructure` | Identity, transactional operational services, PostgreSQL/EF Core, migrations and mail delivery |
+| `FieldOps.Api` | HTTP contracts, composition, authentication/policies, safe errors, logging, health and OpenAPI |
 | `apps/admin-web` | React/Vite shell now; administration workflows after authenticated APIs exist |
 | `apps/mobile` | Strict TypeScript/Expo Router shell now; secure technician workflows and offline persistence later |
 
@@ -40,7 +40,9 @@ Use EF Core Code First with the Npgsql provider and PostgreSQL. Match the EF Cor
 
 Phase 0's initial migration is an empty application schema baseline that establishes EF migration history. It does not introduce a fake business record or bring Phase 1 entities forward. Migrations run explicitly as a deployment/development operation, rather than being applied by every API replica during startup.
 
-For future commands, one application use case owns the transaction. Commit domain changes, audit history, change feed, and idempotency/outbox records together where relevant. Publish notifications and realtime messages after commit; external provider failure must not undo a completed work order. Read queries project directly to DTOs, scope by tenant/resource, use bounded pagination and stable ordering, and avoid unbounded navigation loading.
+Each operational command owns a transaction. It acquires the current organization's PostgreSQL row lock, revalidates the actor, and commits business changes, audit and status history together. The same lock serializes catalog archive checks, assignment/reschedule checks and membership changes in that organization. Separate organizations can write concurrently. The coarse lock keeps Phase 2 invariants straightforward and may warrant finer partitioning after workload measurements. Read queries project DTOs with bounded, stable pagination. Change feeds, idempotency receipts and post-commit notifications belong to later phases. [PostgreSQL row-level locks](https://www.postgresql.org/docs/18/explicit-locking.html#LOCKING-ROWS)
+
+Scheduling and assignment audit compares allowlisted PostgreSQL snapshots before mutation and after the business saves, while the organization lock and transaction remain active. The audit insert and commit follow those saves. Failure rolls back the entire transaction. Typed immutable metadata is serialized into one nullable jsonb column, and audit rows are append-only through EF guards and a database trigger. [Npgsql JSON mapping](https://www.npgsql.org/efcore/mapping/json.html)
 
 ## Tenant and authorization design
 

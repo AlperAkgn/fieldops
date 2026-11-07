@@ -123,6 +123,10 @@ app.UseAuthorization();
 app.UseRateLimiter();
 app.MapAuthEndpoints();
 app.MapOrganizationEndpoints();
+app.MapAuditEndpoints();
+app.MapWorkOrderDetailEndpoints();
+app.MapCatalogEndpoints();
+app.MapWorkOrderEndpoints();
 
 app.MapGet("/health/live", async (HttpContext context, HealthCheckService healthChecks) =>
 {

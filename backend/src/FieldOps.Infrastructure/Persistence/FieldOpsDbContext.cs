@@ -2,6 +2,7 @@ using FieldOps.Application.Common;
 using FieldOps.Application.Tenancy;
 using FieldOps.Domain.Identity;
 using FieldOps.Domain.Organizations;
+using FieldOps.Domain.Operations;
 using FieldOps.Infrastructure.Email;
 using FieldOps.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -73,9 +74,16 @@ public sealed partial class FieldOpsDbContext(DbContextOptions<FieldOpsDbContext
         mail.Property(email => email.LastFailureType).HasMaxLength(100);
         mail.HasIndex(email => new { email.IsDeadLetter, email.NextAttemptAt });
         ConfigureOrganizations(modelBuilder);
+        ConfigureAudit(modelBuilder);
+        ConfigureCatalog(modelBuilder);
+        ConfigureWorkOrders(modelBuilder);
+        ConfigureWorkOrderDetails(modelBuilder);
     }
 
     partial void ConfigureOrganizations(ModelBuilder modelBuilder);
+    partial void ConfigureCatalog(ModelBuilder modelBuilder);
+    partial void ConfigureWorkOrders(ModelBuilder modelBuilder);
+    partial void ConfigureWorkOrderDetails(ModelBuilder modelBuilder);
 
     public override int SaveChanges() => SaveChanges(true);
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -95,8 +103,10 @@ public sealed partial class FieldOpsDbContext(DbContextOptions<FieldOpsDbContext
 
     private async Task GuardTenantWritesAsync(bool async, CancellationToken cancellationToken)
     {
-        if (IsSystemScope) return;
         ChangeTracker.DetectChanges();
+        if (ChangeTracker.Entries<AuditLog>().Any(entry => entry.State is EntityState.Modified or EntityState.Deleted))
+            throw new FieldOpsException(ErrorKind.Forbidden, "audit_immutable", "Recorded audit history cannot be changed.");
+        if (IsSystemScope) return;
         foreach (var entry in ChangeTracker.Entries().Where(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted))
         {
             if (entry.Entity is not ITenantEntity && entry.Entity is not Organization) continue;

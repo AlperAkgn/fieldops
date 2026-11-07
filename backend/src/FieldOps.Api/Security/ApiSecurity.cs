@@ -90,6 +90,7 @@ public static class ApiSecurity
             options.AddPolicy("OrganizationRead", policy => policy.RequireAuthenticatedUser());
             options.AddPolicy("OrganizationOwner", policy => policy.RequireRole(OrganizationRole.OrganizationOwner.ToString()));
             options.AddPolicy("OperationalRead", policy => policy.RequireAuthenticatedUser());
+            options.AddPolicy("CatalogRead", policy => policy.RequireRole("OrganizationOwner", "Manager", "Viewer"));
             options.AddPolicy("OperationalWrite", policy => policy.RequireRole("OrganizationOwner", "Manager"));
             options.AddPolicy("WorkOrderExecute", policy => policy.RequireRole("OrganizationOwner", "Manager", "Technician"));
             options.AddPolicy("OperationalReports", policy => policy.RequireRole("OrganizationOwner", "Manager"));

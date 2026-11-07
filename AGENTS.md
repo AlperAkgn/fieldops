@@ -31,3 +31,12 @@ Read this file, `docs/development-roadmap.md`, and `docs/implementation-status.m
 ## Completion report
 
 List created/changed files, architectural decisions, actual build/test results, known limitations, and next-phase work. Stop at the authorized phase boundary.
+
+## Agent Execution Policy
+
+- Use single-agent execution by default.
+- Do not spawn or delegate tasks to subagents.
+- Do not use multi-agent orchestration.
+- Perform implementation and verification sequentially.
+- Prioritize efficient context usage and focused testing.
+- Only use subagents if the user explicitly authorizes them in a future request.

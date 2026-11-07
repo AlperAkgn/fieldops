@@ -1,13 +1,21 @@
 using System.Text;
 using FieldOps.Application.Identity;
+using FieldOps.Application.Catalog;
+using FieldOps.Application.WorkOrders;
+using FieldOps.Application.Operations;
 using FieldOps.Application.Organizations;
 using FieldOps.Application.Tenancy;
+using FieldOps.Application.WorkOrderDetails;
 using FieldOps.Infrastructure.Authentication;
 using FieldOps.Infrastructure.Email;
 using FieldOps.Infrastructure.Health;
 using FieldOps.Infrastructure.Identity;
+using FieldOps.Infrastructure.Catalog;
+using FieldOps.Infrastructure.WorkOrders;
+using FieldOps.Infrastructure.Operations;
 using FieldOps.Infrastructure.Organizations;
 using FieldOps.Infrastructure.Persistence;
+using FieldOps.Infrastructure.WorkOrderDetails;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -29,6 +37,12 @@ public static class DependencyInjection
             "postgresql", tags: ["ready"], timeout: TimeSpan.FromSeconds(5));
         services.TryAddScoped<TenantContext>();
         services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<OperationalWriteContext>();
+        services.AddScoped<ICatalogService, CatalogService>();
+        services.AddScoped<IWorkOrderService, WorkOrderService>();
+        services.AddScoped<IAuditLogReader, AuditLogReader>();
+        services.AddScoped<IChecklistTemplateService, ChecklistTemplateService>();
+        services.AddScoped<IWorkOrderDetailService, WorkOrderDetailService>();
         if (configuration is not null) services.AddIdentityInfrastructure(configuration);
 
         return services;

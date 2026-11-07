@@ -86,6 +86,11 @@ public sealed class PostgreSqlMigrationTests
         await Assert.ThrowsAsync<NotSupportedException>(() => database.GetService<IMigrator>().MigrateAsync(identity));
         await database.Database.MigrateAsync();
         Assert.Empty(await database.Database.GetPendingMigrationsAsync());
+        Assert.Equal(2, await database.Users.CountAsync());
+        Assert.Equal(2, await database.Organizations.IgnoreQueryFilters().CountAsync());
+        Assert.Equal(3, await database.OrganizationMemberships.IgnoreQueryFilters().CountAsync());
+        Assert.Empty(await database.WorkOrders.IgnoreQueryFilters().ToListAsync());
+        Assert.Empty(await database.Customers.IgnoreQueryFilters().ToListAsync());
     }
 
     [Fact]

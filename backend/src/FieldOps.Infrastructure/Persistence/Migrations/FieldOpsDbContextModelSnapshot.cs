@@ -22,6 +22,292 @@ namespace FieldOps.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("FieldOps.Domain.Catalog.Asset", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AssetCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Brand")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid?>("CategoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly?>("InstallationDate")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("NormalizedAssetCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("SerialNumber")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("ServiceLocationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.Property<DateOnly?>("WarrantyExpirationDate")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("TenantId", "Id");
+
+                    b.HasIndex("TenantId", "CategoryId");
+
+                    b.HasIndex("TenantId", "NormalizedAssetCode")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "IsActive", "Name", "Id");
+
+                    b.ToTable("Assets", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Assets_Dates", "\"WarrantyExpirationDate\" >= \"InstallationDate\"");
+
+                            t.HasCheckConstraint("CK_Assets_Fields", "length(btrim(\"AssetCode\")) > 0 AND length(btrim(\"NormalizedAssetCode\")) > 0 AND length(btrim(\"Name\")) > 0");
+
+                            t.HasCheckConstraint("CK_Assets_Status", "\"Status\" IN ('Active', 'UnderMaintenance', 'OutOfService', 'Retired')");
+
+                            t.HasCheckConstraint("CK_Assets_Version", "\"Version\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.Catalog.AssetCategory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "NormalizedName")
+                        .IsUnique();
+
+                    b.ToTable("AssetCategories", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AssetCategories_Name", "length(btrim(\"Name\")) > 0 AND length(btrim(\"NormalizedName\")) > 0");
+
+                            t.HasCheckConstraint("CK_AssetCategories_Version", "\"Version\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.Catalog.Customer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CustomerType")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "IsActive", "Name", "Id");
+
+                    b.ToTable("Customers", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Customers_Name", "length(btrim(\"Name\")) > 0");
+
+                            t.HasCheckConstraint("CK_Customers_Type", "\"CustomerType\" IN ('Individual', 'Business')");
+
+                            t.HasCheckConstraint("CK_Customers_Version", "\"Version\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.Catalog.ServiceLocation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AddressLine")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("character varying(250)");
+
+                    b.Property<string>("City")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("ContactName")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("ContactPhone")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Country")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal?>("Latitude")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal?>("Longitude")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("PostalCode")
+                        .HasMaxLength(25)
+                        .HasColumnType("character varying(25)");
+
+                    b.Property<string>("StateOrProvince")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("TenantId", "Id");
+
+                    b.HasIndex("TenantId", "IsActive", "Name", "Id");
+
+                    b.ToTable("ServiceLocations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ServiceLocations_Coordinates", "(\"Latitude\" IS NULL) = (\"Longitude\" IS NULL) AND \"Latitude\" BETWEEN -90 AND 90 AND \"Longitude\" BETWEEN -180 AND 180");
+
+                            t.HasCheckConstraint("CK_ServiceLocations_Fields", "length(btrim(\"Name\")) > 0 AND length(btrim(\"AddressLine\")) > 0 AND length(btrim(\"City\")) > 0 AND length(btrim(\"Country\")) > 0");
+
+                            t.HasCheckConstraint("CK_ServiceLocations_Version", "\"Version\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("FieldOps.Domain.Identity.AuthSession", b =>
                 {
                     b.Property<Guid>("Id")
@@ -118,6 +404,57 @@ namespace FieldOps.Infrastructure.Persistence.Migrations
                     b.ToTable("RefreshCredentials", null, t =>
                         {
                             t.HasCheckConstraint("CK_RefreshCredentials_Replacement", "(\"ConsumedAt\" IS NULL) = (\"ReplacedById\" IS NULL) AND \"Id\" IS DISTINCT FROM \"ReplacedById\" ");
+                        });
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.Operations.AuditLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Metadata")
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<Guid>("ResourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ResourceType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("TenantId", "Id");
+
+                    b.HasIndex("TenantId", "ActorUserId");
+
+                    b.HasIndex("TenantId", "OccurredAt", "Id");
+
+                    b.HasIndex("TenantId", "ResourceType", "ResourceId", "OccurredAt");
+
+                    b.ToTable("AuditLogs", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AuditLogs_Metadata", " \"Metadata\" IS NULL OR jsonb_typeof(\"Metadata\") = 'object' ");
                         });
                 });
 
@@ -261,6 +598,377 @@ namespace FieldOps.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_OrganizationMemberships_Role", "\"Role\" IN ('OrganizationOwner', 'Manager', 'Technician', 'Viewer')");
                         });
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.WorkOrderDetails.ChecklistTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "IsActive", "Name", "Id");
+
+                    b.ToTable("ChecklistTemplates", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ChecklistTemplates_Name", "length(btrim(\"Name\")) BETWEEN 1 AND 120");
+
+                            t.HasCheckConstraint("CK_ChecklistTemplates_Version", "\"Version\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.WorkOrderDetails.ChecklistTemplateItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsRequired")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("character varying(240)");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TemplateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "TemplateId", "IsActive", "Position", "Id");
+
+                    b.ToTable("ChecklistTemplateItems", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ChecklistTemplateItems_Label", "length(btrim(\"Label\")) BETWEEN 1 AND 240");
+
+                            t.HasCheckConstraint("CK_ChecklistTemplateItems_Position", "\"Position\" BETWEEN 0 AND 999");
+                        });
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.WorkOrderDetails.WorkOrderChecklistItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CompletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsCompleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsRequired")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("character varying(240)");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SourceTemplateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SourceTemplateItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("SourceTemplateVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("WorkOrderId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CompletedByUserId");
+
+                    b.HasIndex("TenantId", "SourceTemplateId", "SourceTemplateItemId");
+
+                    b.HasIndex("TenantId", "WorkOrderId", "SourceTemplateItemId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "WorkOrderId", "Position", "Id");
+
+                    b.ToTable("WorkOrderChecklistItems", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_WorkOrderChecklistItems_Completion", "(\"IsCompleted\" AND \"CompletedByUserId\" IS NOT NULL AND \"CompletedAt\" IS NOT NULL) OR\n(NOT \"IsCompleted\" AND \"CompletedByUserId\" IS NULL AND \"CompletedAt\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_WorkOrderChecklistItems_Label", "length(btrim(\"Label\")) BETWEEN 1 AND 240");
+
+                            t.HasCheckConstraint("CK_WorkOrderChecklistItems_Position", "\"Position\" BETWEEN 0 AND 999");
+
+                            t.HasCheckConstraint("CK_WorkOrderChecklistItems_SourceVersion", "\"SourceTemplateVersion\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.WorkOrderDetails.WorkOrderComment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AuthorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Visibility")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<Guid>("WorkOrderId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AuthorUserId");
+
+                    b.HasIndex("TenantId", "WorkOrderId", "CreatedAt", "Id");
+
+                    b.ToTable("WorkOrderComments", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_WorkOrderComments_Body", "length(btrim(\"Body\")) BETWEEN 1 AND 4000");
+
+                            t.HasCheckConstraint("CK_WorkOrderComments_Visibility", "\"Visibility\" IN ('TechnicianVisible', 'Internal')");
+                        });
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.WorkOrders.WorkOrder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ActualEndAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ActualStartAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AssetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<DateTimeOffset?>("PlannedEndAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("PlannedStartAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Priority")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<Guid>("ServiceLocationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("WorkOrderNumber")
+                        .IsRequired()
+                        .HasMaxLength(35)
+                        .HasColumnType("character varying(35)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CreatedByUserId");
+
+                    b.HasIndex("TenantId", "WorkOrderNumber")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "AssetId", "ActualEndAt");
+
+                    b.HasIndex("TenantId", "CreatedAt", "Id");
+
+                    b.HasIndex("TenantId", "Status", "PlannedStartAt");
+
+                    b.HasIndex("TenantId", "CustomerId", "ServiceLocationId", "AssetId");
+
+                    b.ToTable("WorkOrders", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_WorkOrders_ActualInterval", "(\"ActualStartAt\" IS NULL AND \"ActualEndAt\" IS NULL AND \"Status\" IN ('Draft', 'Scheduled', 'Assigned', 'Cancelled'))\nOR (\"ActualStartAt\" IS NOT NULL AND \"ActualEndAt\" IS NULL AND \"Status\" IN ('InProgress', 'OnHold'))\nOR (\"ActualStartAt\" IS NOT NULL AND \"ActualEndAt\" IS NOT NULL AND \"ActualStartAt\" <= \"ActualEndAt\" AND \"Status\" IN ('Completed', 'Cancelled'))");
+
+                            t.HasCheckConstraint("CK_WorkOrders_PlannedInterval", "(\"PlannedStartAt\" IS NULL AND \"PlannedEndAt\" IS NULL AND \"Status\" IN ('Draft', 'Cancelled'))\nOR (\"PlannedStartAt\" IS NOT NULL AND \"PlannedEndAt\" IS NOT NULL AND \"PlannedStartAt\" < \"PlannedEndAt\" AND \"Status\" <> 'Draft')");
+
+                            t.HasCheckConstraint("CK_WorkOrders_Priority", " \"Priority\" IN ('Low', 'Medium', 'High', 'Critical') ");
+
+                            t.HasCheckConstraint("CK_WorkOrders_Status", " \"Status\" IN ('Draft', 'Scheduled', 'Assigned', 'InProgress', 'OnHold', 'Completed', 'Cancelled') ");
+
+                            t.HasCheckConstraint("CK_WorkOrders_Version", " \"Version\" > 0 ");
+                        });
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.WorkOrders.WorkOrderAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("AssignedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("AssignedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsPrimary")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("RemovedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TechnicianUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("WorkOrderId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AssignedByUserId");
+
+                    b.HasIndex("TenantId", "WorkOrderId")
+                        .IsUnique()
+                        .HasFilter(" \"IsPrimary\" AND \"RemovedAt\" IS NULL ");
+
+                    b.HasIndex("TenantId", "TechnicianUserId", "WorkOrderId")
+                        .HasFilter(" \"RemovedAt\" IS NULL ");
+
+                    b.HasIndex("TenantId", "WorkOrderId", "TechnicianUserId")
+                        .IsUnique()
+                        .HasFilter(" \"RemovedAt\" IS NULL ");
+
+                    b.ToTable("WorkOrderAssignments", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_WorkOrderAssignments_RemovedAt", " \"RemovedAt\" IS NULL OR \"AssignedAt\" <= \"RemovedAt\" ");
+                        });
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.WorkOrders.WorkOrderStatusHistory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ChangedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ChangedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PreviousStatus")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("WorkOrderId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("WorkOrderVersion")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ChangedByUserId");
+
+                    b.HasIndex("TenantId", "WorkOrderId", "WorkOrderVersion")
+                        .IsUnique();
+
+                    b.ToTable("WorkOrderStatusHistories", (string)null);
                 });
 
             modelBuilder.Entity("FieldOps.Infrastructure.Email.OutboundEmail", b =>
@@ -449,6 +1157,50 @@ namespace FieldOps.Infrastructure.Persistence.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("FieldOps.Domain.Catalog.Asset", b =>
+                {
+                    b.HasOne("FieldOps.Domain.Catalog.AssetCategory", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "CategoryId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("FieldOps.Domain.Catalog.ServiceLocation", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "CustomerId", "ServiceLocationId")
+                        .HasPrincipalKey("TenantId", "CustomerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.Catalog.AssetCategory", b =>
+                {
+                    b.HasOne("FieldOps.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.Catalog.Customer", b =>
+                {
+                    b.HasOne("FieldOps.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.Catalog.ServiceLocation", b =>
+                {
+                    b.HasOne("FieldOps.Domain.Catalog.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "CustomerId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("FieldOps.Domain.Identity.AuthSession", b =>
                 {
                     b.HasOne("FieldOps.Domain.Organizations.Organization", null)
@@ -494,6 +1246,16 @@ namespace FieldOps.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("FieldOps.Domain.Operations.AuditLog", b =>
+                {
+                    b.HasOne("FieldOps.Domain.Organizations.OrganizationMembership", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "ActorUserId")
+                        .HasPrincipalKey("TenantId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("FieldOps.Domain.Organizations.OrganizationInvitation", b =>
                 {
                     b.HasOne("FieldOps.Domain.Organizations.Organization", null)
@@ -527,6 +1289,136 @@ namespace FieldOps.Infrastructure.Persistence.Migrations
                     b.HasOne("FieldOps.Infrastructure.Identity.FieldOpsUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.WorkOrderDetails.ChecklistTemplate", b =>
+                {
+                    b.HasOne("FieldOps.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.WorkOrderDetails.ChecklistTemplateItem", b =>
+                {
+                    b.HasOne("FieldOps.Domain.WorkOrderDetails.ChecklistTemplate", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "TemplateId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.WorkOrderDetails.WorkOrderChecklistItem", b =>
+                {
+                    b.HasOne("FieldOps.Domain.Organizations.OrganizationMembership", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "CompletedByUserId")
+                        .HasPrincipalKey("TenantId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("FieldOps.Domain.WorkOrders.WorkOrder", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "WorkOrderId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FieldOps.Domain.WorkOrderDetails.ChecklistTemplateItem", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "SourceTemplateId", "SourceTemplateItemId")
+                        .HasPrincipalKey("TenantId", "TemplateId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.WorkOrderDetails.WorkOrderComment", b =>
+                {
+                    b.HasOne("FieldOps.Domain.Organizations.OrganizationMembership", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AuthorUserId")
+                        .HasPrincipalKey("TenantId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FieldOps.Domain.WorkOrders.WorkOrder", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "WorkOrderId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.WorkOrders.WorkOrder", b =>
+                {
+                    b.HasOne("FieldOps.Domain.Organizations.OrganizationMembership", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "CreatedByUserId")
+                        .HasPrincipalKey("TenantId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FieldOps.Domain.Catalog.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "CustomerId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FieldOps.Domain.Catalog.ServiceLocation", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "CustomerId", "ServiceLocationId")
+                        .HasPrincipalKey("TenantId", "CustomerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FieldOps.Domain.Catalog.Asset", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "CustomerId", "ServiceLocationId", "AssetId")
+                        .HasPrincipalKey("TenantId", "CustomerId", "ServiceLocationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.WorkOrders.WorkOrderAssignment", b =>
+                {
+                    b.HasOne("FieldOps.Domain.Organizations.OrganizationMembership", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AssignedByUserId")
+                        .HasPrincipalKey("TenantId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FieldOps.Domain.Organizations.OrganizationMembership", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "TechnicianUserId")
+                        .HasPrincipalKey("TenantId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FieldOps.Domain.WorkOrders.WorkOrder", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "WorkOrderId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FieldOps.Domain.WorkOrders.WorkOrderStatusHistory", b =>
+                {
+                    b.HasOne("FieldOps.Domain.Organizations.OrganizationMembership", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "ChangedByUserId")
+                        .HasPrincipalKey("TenantId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FieldOps.Domain.WorkOrders.WorkOrder", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "WorkOrderId")
+                        .HasPrincipalKey("TenantId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

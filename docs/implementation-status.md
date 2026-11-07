@@ -4,7 +4,7 @@ Last updated: 2026-11-07 (Europe/Istanbul).
 
 ## Authorization boundary
 
-**Phases 0 and 1 are complete. The final Phase 1 security remediation passed its local quality gate. Phases 2–8 have not started.** Phase 2 requires separate explicit authorization.
+**Phases 0–2 are complete. Phase 2 audit remediation passed the local quality gate. Phases 3–8 have not started.** Phase 3 requires separate explicit authorization.
 
 ## Phase 0 revalidation (historical)
 
@@ -25,7 +25,7 @@ The revalidation superseded the historical first-run table below. The audit reco
 | --- | --- | --- |
 | 0 | Complete | Foundation and architecture |
 | 1 | Complete | Identity and multi-tenancy |
-| 2 | Not Started | Core domain and API |
+| 2 | Complete | Core domain and API |
 | 3 | Not Started | Admin web dashboard |
 | 4 | Not Started | Technician mobile workflows |
 | 5 | Not Started | Offline-first synchronization |
@@ -149,15 +149,42 @@ The Phase 1 acceptance tasks are complete. External SMTP delivery, hosted CI and
 
 ### Next steps
 
-After Phase 2 authorization, implement the core domain and API using the existing tenant and authorization boundaries. The first slices cover customers, locations and assets before work orders and assignments.
+Phase 2 used these identity and tenant boundaries for the core operational APIs.
 
 ## Phase 2 — Core domain and API
 
-- Completed: none; not started.
-- Pending: customers/locations/assets, work orders, assignments/overlap/overrides, exact state machine, comments, checklist snapshots/completion, history/audit, validation/pagination/filtering/versions and tenant constraints.
-- Blockers: separate user authorization.
-- Verification: not run. Plan unit business-rule/state/concurrency checks and PostgreSQL workflows, relationships, transaction/assignment races and isolation tests.
-- Next steps: implement authorized vertical slices after Phase 1 acceptance.
+### Completed tasks
+
+- Implemented customer, location, asset category and asset management with validation, partial updates, archive and stable filtered pagination.
+- Implemented work orders, schedules, multiple technician assignments and a primary technician, availability conflicts and audited overrides, exact state transitions, actual timestamps and status history.
+- Implemented comments with internal visibility restrictions, reusable checklist templates and immutable snapshots, progress and required-item completion rules.
+- Added transactional business audit, resource authorization, tenant-composite foreign keys and bigint concurrency versions. Writes serialize on the organization row and revalidate current access.
+- Added `20261107100957_CoreOperations` and updated architecture, API, security, database and setup documentation. The continuation was completed by the main agent.
+
+### Verification results
+
+- Locked restore, Release build and format passed with zero build warnings and errors.
+- 92 unit cases passed. The full PostgreSQL integration suite passed all 123 cases, including Phase 0 and Phase 1 regressions, with zero failures or skips.
+- Verified Manager and Technician lifecycles, all 49 status pairs, checklist snapshot preservation, required-item gates, comment visibility, cross-tenant and same-customer foreign keys, write guards, concurrent version/assignment/reschedule conflicts, role changes while waiting on locks, audit rollback and guarded migration downgrade.
+- The isolated Docker image applied all five migrations and passed trusted HTTPS core API and web authentication smoke tests with actual local Mailpit delivery. EF reported no pending model changes and repeated migration application succeeded.
+- Client lint, strict typechecks, 46 client tests, web build, Expo compatibility, Android/iOS exports and live Metro smoke passed during this Phase 2 task. Workflow syntax passed `actionlint`.
+
+### Audit history remediation
+
+- Reproduced the independent audit finding with a failing test before changing production code.
+- Added allowlisted before/after schedule, assignment and primary metadata with entity versions, using PostgreSQL snapshots under the existing organization lock. Actor, time and override reason retain their existing audit fields.
+- Added EF and PostgreSQL append-only protection and the nullable `20261107124549_AuditOperationalChanges` migration. Legacy audit values remain intact and their missing metadata remains null.
+- Passed 10 focused audit cases, then all 92 unit and 130 PostgreSQL integration cases with zero failures or skips. All original 215 backend cases remain, with seven new integration cases.
+- Release build and format passed with zero build warnings and errors. Fresh and populated upgrades, typed metadata round-trip, guarded downgrade, transaction rollback, stale versions, tenant isolation and immutable history passed.
+- The isolated Linux image applied all six migrations and passed trusted HTTPS audit and core API smoke. EF reported no pending model changes and migration reapplication succeeded.
+
+**Phase 3 readiness is READY.** [Audit remediation evidence and changed files](phase-2-audit-remediation.md)
+
+### Pending tasks, limits and next steps
+
+The default database retains its original two migrations and requires the documented backup and rollout procedure. Hosted CI, external SMTP and native devices remain separate verification environments. The organization write lock is deliberately coarse and should be measured before changing its scope.
+
+After explicit Phase 3 authorization, build the admin web workflows against these APIs. [Phase 2 results and source inventory](phase-2-results.md) · [Migration rollout plan](phase-2-migration-plan.md)
 
 ## Phase 3 — Admin web dashboard
 

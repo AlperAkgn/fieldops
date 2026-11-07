@@ -8,7 +8,7 @@
 | `GET /health/ready` | PostgreSQL connectivity and zero pending EF migrations | Anonymous, minimal operational output |
 | `GET /openapi/v1.json` | Generated OpenAPI specification | Development environment only |
 
-Readiness returns 200 when PostgreSQL is reachable and migrations are current. An unavailable dependency returns 503 and a redacted check status. The liveness probe checks the process independently. Development OpenAPI includes health contracts, Phase 1 routes, and bearer requirements.
+Readiness returns 200 when PostgreSQL is reachable and migrations are current. An unavailable dependency returns 503 and a redacted check status. The liveness probe checks the process independently. Development OpenAPI includes health, identity and operational contracts with their bearer requirements.
 
 ## Phase 1 routes
 
@@ -49,15 +49,19 @@ Member and invitation lists return arrays with `offset` (default 0) and `limit` 
 
 The generated Phase 1 OpenAPI describes the applicable ProblemDetails responses. Throttled requests return 429 and a `Retry-After` delay in seconds.
 
+Audit scheduling and assignment records include read-only `metadata` with `previousVersion`, `entityVersion` and `changes`. Each changed field contains `previous` and `current`. A null change entry means that field did not change. The allowlisted fields are `plannedStartAt`, `plannedEndAt`, `technicianUserIds` and `primaryTechnicianUserId`. Legacy audit rows and other action types can have null metadata.
+
+The existing `scheduled`, `rescheduled`, `assignments_changed` and `availability_overridden` actions retain their names. An override action and its scheduling or assignment action describe the same command and carry the same metadata, version and timestamp. The override row retains its reason. Audit metadata is derived from database snapshots within the business transaction. Request bodies cannot supply it.
+
 An ordinary registration opens an organization. An invitation is accepted from a signed-in, verified account. Email messages supply the values for confirmation, reset, and invitation acceptance. The local inbox is available through Mailpit. [Local setup](deployment.md)
 
-## Planned conventions
+## Operational conventions
 
 Business endpoints use `/api/v1`. Contracts are explicit DTOs with UUID identifiers, UTC ISO-8601 instants, stable enum representations, and an integer version for mutable aggregates. Never bind TenantId from a request body. Resolve current tenant from validated membership and token/session context; organization switching issues a context valid for the chosen membership. Endpoint policies and resource checks apply independently of client navigation.
 
-Use resource JSON directly, collection responses shaped as `{ items, page, pageSize, totalCount }`, and safe ProblemDetails for errors. Management list requests support bounded `pageSize` (default 25, maximum 100), allowlisted sort/filter fields, stable ID tie-breakers, and parameterized search. Sync uses an opaque cursor rather than page numbers. These business DTOs are design contracts to implement and test in their owning phases.
+Operational lists return `{ items, page, pageSize, totalCount }` with one-based pages, a default page size of 25 and a maximum of 100. Sorting uses an allowlist and a stable ID tie-breaker. Writes against existing aggregates take `expectedVersion`; after a successful mutation use the returned version for the next request. A conflict returns 409 and the client reloads the resource before retrying.
 
-| Status | Planned meaning |
+| Status | Meaning |
 | --- | --- |
 | 200 / 201 / 204 | Read/update result, created resource with Location, or completed bodyless action |
 | 400 | Malformed input, field validation, or unsupported sort/filter |
@@ -70,22 +74,58 @@ Use resource JSON directly, collection responses shaped as `{ items, page, pageS
 
 Choose `400` for ordinary validation and `409` for current-state business conflicts; do not introduce inconsistent `422` handling. ProblemDetails contains standard type/title/status, a stable safe `code`, `traceId`, and field `errors` when relevant. Responses never expose EF/provider exception details. Conflict responses may include the current version only after authorization. Refresh/reset/invitation errors do not disclose account existence.
 
-## Planned endpoint/policy map
+## Phase 2 routes
 
-The remaining groups are planned for later phases.
+All routes in this section use the `/api/v1` prefix and active-tenant membership. Catalog reads allow Owners, Managers and Viewers. Catalog writes require an Owner or Manager. Technician work-order reads and actions are scoped to current assignments. Work-order detail supplies the service address without granting technicians general catalog access.
+
+| Routes | Contract |
+| --- | --- |
+| GET / POST `/customers`, GET / PATCH / DELETE `/customers/{id}` | Create, read, filter and archive customers. List by search, customer type and active status. Customer types are `Individual` and `Business`. |
+| GET / POST `/service-locations`, GET / PATCH / DELETE `/service-locations/{id}` | Locations belong to one customer. Lists support customer and active-status filters. Latitude and longitude are supplied together within geographic bounds. |
+| GET / POST `/asset-categories`, GET / PATCH / DELETE `/asset-categories/{id}` | Tenant-local categories with unique normalized names. |
+| GET / POST `/assets`, GET / PATCH / DELETE `/assets/{id}` | Assets belong to a valid customer/location pair and may have a category. Lists support customer, location, category, status and active-status filters. |
+| GET `/assets/{id}/service-history` | Paged completed work orders for the asset, including archived assets. |
+| GET / POST `/work-orders`, GET / PATCH `/work-orders/{id}` | Create in Draft, list and read, and update editable fields. Work-order filters include customer, location, asset, assigned technician, status, priority and planned range. |
+| POST `/work-orders/{id}/schedule`, `/assign`, `/cancel` | Owner/Manager commands. Scheduling uses offset-bearing timestamps. Assignments name active same-tenant technicians and one primary. Overlap requires an explicit reasoned override. |
+| POST `/work-orders/{id}/start`, `/pause`, `/resume`, `/complete` | Owner/Manager or an assigned technician. Completion requires all required checklist items. |
+| GET `/work-orders/{id}/history` | Paged status transitions with actor, time and version. |
+| GET / POST `/work-orders/{id}/comments` | Paged comments and authorized append. Internal comments are visible only to Owners and Managers. |
+| GET `/work-orders/{id}/checklist`, POST `/work-orders/{id}/checklist/apply`, PATCH `/work-orders/{id}/checklist/{itemId}` | Read progress, apply a one-time template snapshot as an Owner/Manager, and set completion state as an authorized executor. |
+| GET / POST `/checklist-templates`, GET / PATCH / DELETE `/checklist-templates/{id}` | Manage reusable versioned templates. DELETE archives the template. |
+| POST `/checklist-templates/{id}/items`, PATCH / DELETE `/checklist-templates/{id}/items/{itemId}` | Add, edit or archive a template item without changing existing work-order snapshots. |
+| GET `/audit-logs` | Owner/Manager only. Filter by `resourceType`, `resourceId`, `action`, `actorUserId`, `from` and exclusive `to`. |
+
+DELETE on the catalog archives the row and takes `expectedVersion` in the query. Default lists show active rows. Use `includeArchived=true` or the active-status filter for history. Existing work-order and asset history references remain valid.
+
+Catalog lists accept `sort=name|createdAt|updatedAt` with a leading `-` for descending order. Locations also accept `city`, and assets accept `assetCode`. Work-order lists accept `sortBy=createdAt|updatedAt|title|plannedStartAt` and `descending=true|false`. Search treats wildcard characters as literal input.
+
+Customer/location ownership of assets and locations is fixed when they are created. Work-order references can change while the order is a Draft. Catalog PATCH distinguishes omitted properties from explicit null, allowing optional data to be cleared. Work-order PATCH accepts an empty description to clear it and `clearAsset=true` to remove the optional asset.
+
+Schedule and assignment commands use these request shapes. Replace the IDs and expected version with values from the preceding response.
+
+```json
+{
+  "expectedVersion": 2,
+  "plannedStartAt": "2027-01-10T09:00:00Z",
+  "plannedEndAt": "2027-01-10T10:00:00Z"
+}
+```
+
+```json
+{
+  "expectedVersion": 3,
+  "technicianUserIds": ["11111111-1111-1111-1111-111111111111"],
+  "primaryTechnicianUserId": "11111111-1111-1111-1111-111111111111",
+  "overrideReason": null
+}
+```
+
+Valid state transitions are Draft → Scheduled or Cancelled, Scheduled → Assigned or Cancelled, Assigned → InProgress or Cancelled, InProgress → OnHold or Completed, and OnHold → InProgress or Cancelled. Completed and Cancelled are terminal. Schedule and assignment changes can retain the current state while it remains editable. Availability checks use half-open intervals `[start,end)` for technician memberships within the active organization.
+
+## Planned endpoint/policy map
 
 | Group and routes | Minimum policy and resource constraint | Phase |
 | --- | --- | --- |
-| `GET /customers`, `/customers/{id}` | OperationalRead in active tenant | 2 |
-| `POST /customers`, `PATCH /customers/{id}`, `DELETE /customers/{id}` | OperationalWrite (Owner/Manager); DELETE archives | 2 |
-| `GET /service-locations`, `/service-locations/{id}`; `POST /service-locations`; `PATCH /service-locations/{id}` | Scoped read or OperationalWrite, valid same-tenant customer | 2 |
-| `GET /assets`, `/assets/{id}`, `/assets/{id}/service-history`; `POST /assets`; `PATCH /assets/{id}` | Scoped read or OperationalWrite, valid customer/location | 2 |
-| `GET /work-orders`, `/work-orders/{id}`, `/work-orders/{id}/history` | Owner/Manager/Viewer policy; technician query restricted to authorized assignments | 2 |
-| `POST /work-orders`, `PATCH /work-orders/{id}` | OperationalWrite; valid references, expected version on mutation | 2 |
-| `POST /work-orders/{id}/schedule`, `/assign`, `/cancel` | Owner/Manager; validated transition, overlap/override checks and audit | 2 |
-| `POST /work-orders/{id}/start`, `/pause`, `/resume`, `/complete` | AssignedTechnician or authorized manager; state/version/checklist rules | 2 |
-| `GET/POST /work-orders/{id}/comments`, `GET/PATCH /work-orders/{id}/checklist` | WorkOrderRead/WorkOrderExecute; internal notes hidden from technicians | 2 |
-| Checklist template CRUD | OperationalWrite for mutations; tenant-scoped access | 2 |
 | `POST /sync/push`, `GET /sync/pull` | Active technician membership/device scope; authorize each operation/resource | 5 |
 | Work order attachment upload/download routes | Work-order resource permission; private object authorization | 6 |
 | `GET /dashboard/overview`, `/dashboard/work-order-statistics`, `/dashboard/technician-performance` | OperationalReports (Owner/Manager); tenant-scoped aggregates | 3/6 |

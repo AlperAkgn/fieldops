@@ -23,6 +23,10 @@ Confirmation and password reset tokens expire after one hour. Invitation credent
 
 ## Tenant and resource isolation — Phases 1–2
 
+Phase 2 catalog reads require an Owner, Manager or Viewer role, and catalog mutations require an Owner or Manager. Technicians read related customer, address and asset summaries through assigned work orders. Every work-order subresource checks the authorized parent. Only Owners and Managers read or write internal comments and read audit logs. Operational writes revalidate the session and membership after acquiring the organization lock, so a role change committed while a request waited cannot retain stale write authority.
+
+Customer archive keeps relationships and history. It prevents new location or work-order references to the customer. Template updates and archive preserve copied work-order checklist fields. Completing an order checks required snapshot items in the same transaction as the state transition and audit entry. Conflicting versions and assignments return 409. Availability overrides require an authorized manager and a recorded reason.
+
 The active tenant comes from verified authenticated membership. A user-supplied TenantId, URL organization ID, token claim, object key, or SignalR group name is never sufficient authority. Reject inactive organizations/memberships and prevent removing/demoting the last active owner. OrganizationOwner privileges apply only within that organization.
 
 | Layer | Required enforcement |

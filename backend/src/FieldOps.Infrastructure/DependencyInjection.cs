@@ -41,6 +41,7 @@ public static class DependencyInjection
         services.AddScoped<ICatalogService, CatalogService>();
         services.AddScoped<IWorkOrderService, WorkOrderService>();
         services.AddScoped<IAuditLogReader, AuditLogReader>();
+        services.AddScoped<FieldOps.Application.Reporting.IReportingReader, ReportingReader>();
         services.AddScoped<IChecklistTemplateService, ChecklistTemplateService>();
         services.AddScoped<IWorkOrderDetailService, WorkOrderDetailService>();
         if (configuration is not null) services.AddIdentityInfrastructure(configuration);

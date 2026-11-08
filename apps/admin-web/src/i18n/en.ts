@@ -10,7 +10,8 @@ export const messages = {
   phaseName: 'Foundation & architecture',
   workspace: 'Development workspace',
   heading: 'A strong foundation for every field operation.',
-  description: 'The platform foundation is in place. Check the live connection to your API and database below.',
+  description:
+    'The platform foundation is in place. Check the live connection to your API and database below.',
   serviceHeading: 'Service connectivity',
   serviceDescription: 'Live checks against your configured development API.',
   refresh: 'Check connection',
@@ -26,11 +27,14 @@ export const messages = {
   unhealthy: 'Unhealthy',
   errorHelp: 'Check that Docker and the API are running, then try again.',
   invalidConfiguration: 'Invalid configuration',
-  configurationError: 'Set VITE_API_BASE_URL to an HTTPS API origin, such as https://localhost:5443. Do not include credentials or a path.',
+  configurationError:
+    'Set VITE_API_BASE_URL to an HTTPS API origin, such as https://localhost:5443. Do not include credentials or a path.',
   nextLabel: 'NEXT · PHASE 02',
   nextTitle: 'Core domain & API',
-  nextDescription: 'Customer, location, asset, and work order APIs form the next implementation phase.',
-  scopeNote: 'Identity and organization APIs are available. Product sign-in and operational screens will arrive in their planned client phases.',
+  nextDescription:
+    'Customer, location, asset, and work order APIs form the next implementation phase.',
+  scopeNote:
+    'Identity and organization APIs are available. Product sign-in and operational screens will arrive in their planned client phases.',
   endpointLabel: 'API endpoint',
   footer: 'Manage field operations. Empower technicians.',
 } as const;

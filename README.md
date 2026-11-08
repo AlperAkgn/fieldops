@@ -2,7 +2,7 @@
 
 Manage field operations, empower technicians, and keep every service job under control.
 
-FieldOps is a multi-tenant field service management platform in development. Phase 2 adds customers, service locations, assets and work orders to the verified identity and organization foundation. The web dashboard milestone is Phase 3.
+FieldOps is a multi-tenant field service management platform in development. The Phase 3 admin workspace connects customer, equipment, scheduling and work-order workflows to the verified identity and operational APIs. The technician mobile workflows are the next authorized milestone.
 
 ## Problem and product scope
 
@@ -20,7 +20,9 @@ The first release targets general field service operations rather than a single 
 - Central status transitions, comments with restricted internal visibility, immutable checklist snapshots and completion rules.
 - Tenant-scoped business audit, composite relationship constraints and PostgreSQL transaction tests.
 - Separate process liveness and database/migration readiness endpoints, structured JSON logs, safe ProblemDetails responses, and development OpenAPI.
-- Strict TypeScript React/Vite and Expo Router applications that inspect the real API health, report loading/errors, and allow retry.
+- A responsive React admin workspace with secure cookie authentication, organization switching, role-aware routes, customer/location/asset CRUD, work-order actions, assignments, comments, checklists and structured audit history.
+- Actual PostgreSQL-backed overview/report aggregates, daily/weekly scheduling, conflict/override forms, owner-controlled team administration and session settings.
+- An Expo Router foundation that inspects API health; technician mobile workflows remain Phase 4.
 - Local PostgreSQL, API, migration job, Mailpit email capture, and MinIO using Docker Compose.
 - Locked dependencies, backend architecture/health/database tests, client transport tests, and a GitHub Actions workflow.
 
@@ -31,7 +33,7 @@ Implementation evidence and phase gates are tracked in [implementation status](d
 | Area | Foundation |
 | --- | --- |
 | Backend | C# / ASP.NET Core 10, EF Core 10, Npgsql PostgreSQL provider |
-| Admin web | React 19, TypeScript strict mode, Vite 8, TanStack Query |
+| Admin web | React 19, strict TypeScript, Vite 8, Tailwind 4, React Router, TanStack Query, React Hook Form/Zod, Recharts, Lucide |
 | Mobile | Expo SDK 58, React Native 0.88, Expo Router, TypeScript strict mode |
 | Database | PostgreSQL 18.6 |
 | Local infrastructure | Docker Compose, non-root API and MinIO containers |
@@ -172,7 +174,7 @@ Phase 5 will use Expo SQLite, a durable local outbox, server-side operation idem
 
 ## Screenshots and demo
 
-The current applications display technical foundation health. Product screenshots, demo seed data, demo accounts, and a deployed demo will be added only after their real workflows exist. No public demo or credentials are available.
+The admin web now runs actual operational workflows. Playwright produces desktop, dark-theme and mobile-width screenshots in the ignored `artifacts/phase-3` directory; its accounts are disposable local test fixtures. The mobile app remains the health foundation. No public demo or deployed credentials are available; a reusable product demo seed remains Phase 8.
 
 ## Roadmap
 
@@ -189,3 +191,19 @@ The current applications display technical foundation health. Product screenshot
 | 8 | Demo seed, screenshots, deployment guide, final release acceptance |
 
 See [development roadmap](docs/development-roadmap.md) for acceptance gates and [implementation status](docs/implementation-status.md) for actual results. Development stops after each authorized phase.
+
+## Admin web workflows and browser tests
+
+Start the documented HTTPS API/Compose stack and run `npm run web:dev`. Open `https://localhost:5173`. Register an organization, open local Mailpit at `http://localhost:8025`, and paste the activation user ID/token into **Activate account** to choose a password. Login uses a Secure HttpOnly refresh cookie; access credentials stay in memory. Owners manage invitations/roles, managers dispatch work, viewers read catalog/orders, and technicians can access assigned orders. The sidebar organization selector changes the current workspace and clears cached data.
+
+The API origin defaults to `https://localhost:5443`; set `VITE_API_BASE_URL` before starting/building the web application when necessary. The Vite TLS certificate path/password use the ignored root `.env` values documented above. Production web hosting must serve `index.html` for client routes and use HTTPS and the configured API Origin allowlist. This task does not deploy a site.
+
+Browser tests need a **disposable** PostgreSQL/API/Mailpit stack with all migrations applied. `infrastructure/docker/compose.e2e.yml` raises rate limits only for that disposable project because fixtures create multiple real accounts; never apply it to the default development stack. Configure `FIELDOPS_E2E_API` and `FIELDOPS_E2E_MAIL` to that stack (defaults: HTTPS API 5443 and Mailpit 8039), keep the web Origin at `https://localhost:5173`, and run:
+
+```sh
+npx playwright install chromium
+npm run test:e2e --workspace=@fieldops/admin-web
+npm run format:check --workspace=@fieldops/admin-web
+```
+
+`FIELDOPS_BROWSER_CHANNEL=msedge` selects an installed Edge browser on Windows. The test context accepts the local development certificate; production request TLS validation is unchanged. The tests register/activate real accounts, deliver emails through local SMTP, exercise all core manager workflows and owner controls, check cross-tenant/role boundaries, and coordinate rotating cookies across two tabs. Screenshots/traces/reports are ignored under `artifacts/phase-3`; do not publish traces or database/key backups. See [Phase 3 results](docs/phase-3-results.md) and the [safe migration rollout](docs/phase-3-migration-plan.md).

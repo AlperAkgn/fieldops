@@ -128,7 +128,8 @@ Valid state transitions are Draft → Scheduled or Cancelled, Scheduled → Assi
 | --- | --- | --- |
 | `POST /sync/push`, `GET /sync/pull` | Active technician membership/device scope; authorize each operation/resource | 5 |
 | Work order attachment upload/download routes | Work-order resource permission; private object authorization | 6 |
-| `GET /dashboard/overview`, `/dashboard/work-order-statistics`, `/dashboard/technician-performance` | OperationalReports (Owner/Manager); tenant-scoped aggregates | 3/6 |
+| `GET /reports/work-orders?from=&to=` | OperationalReports (Owner/Manager); actual tenant-scoped counters, distributions, workload, upcoming orders and recent activities | 3 |
+| `GET /technicians?page=1&pageSize=25&search=` | OperationalReports (Owner/Manager); paged active, verified technician directory with user ID and display name only | 3 |
 | Notification list/read and device registration commands | Own user/device within validated active organization | 6 |
 | Authenticated SignalR hub | Tenant and recipient/resource checks; server-selected groups only | 6 |
 
@@ -141,3 +142,13 @@ Sync operations carry OperationId, entity/type, ExpectedVersion, ClientCreatedAt
 SignalR messages are post-commit invalidation hints containing minimal identifiers/version, not authoritative replacements for API reads. Clients reconnect and revalidate authorized data after missed events. Provider delivery failures are retried outside the business transaction.
 
 OpenAPI must evolve with actual implemented routes and policies. Phase 1 tests add authentication/challenge/authorization and safe error contracts; Phase 2 adds end-to-end workflow, validation, tenant/IDOR, and concurrency assertions. See [security.md](security.md) and [development-roadmap.md](development-roadmap.md).
+
+## Phase 3 read-only reports
+
+`GET /api/v1/reports/work-orders` returns total, active, completed and overdue order counts; active technician count; completion percentage; status and priority distributions; workload for the top 50 active technicians; eight upcoming active orders; and eight recent audit activities. It uses one PostgreSQL repeatable-read snapshot. All database queries explicitly constrain the validated tenant and retain EF tenant filters. Viewer/Technician roles receive 403. No member email, comment body, override reason or credential is included in report activity summaries.
+
+Optional `from` (inclusive) and `to` (exclusive) are UTC-offset timestamps. They constrain order creation time, and activity occurrence time for the activity list. Active means any nonterminal status, including Draft. Overdue means active with planned end before server time. Completion percentage is completed / total, rounded to one decimal; an empty period returns zero. Active-technician count is the current verified, active membership population, independent of order creation dates. Workload counts each current assignment on an active order in the chosen creation period; multiple technicians can count the same order. Upcoming orders retain the same creation-period filter and require planned start at or after server time.
+
+`GET /api/v1/technicians` supports page/pageSize (maximum 100) and a printable search of at most 100 characters. It exposes only userId/displayName for active, email-confirmed Technician memberships in the current organization. Managers can assign technicians without gaining the owner-only member administration endpoint. Both endpoints propagate cancellation and use the existing operational rate limit.
+
+The admin uses hand-maintained narrow DTOs checked against these contracts and real API/browser tests. OpenAPI generation was evaluated; a generated full client is unnecessary for this bounded API surface. OpenAPI remains available in Development.

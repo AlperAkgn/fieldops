@@ -1,0 +1,8 @@
+# Use only with a disposable E2E project, never with the default development stack.
+services:
+  api:
+    environment:
+      RateLimits__AuthPermitLimit: '10000'
+      RateLimits__RequestsPermitLimit: '10000'
+      RateLimits__IpPermitLimit: '10000'
+      Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command: Warning

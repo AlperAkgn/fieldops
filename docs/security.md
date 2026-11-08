@@ -72,3 +72,13 @@ Allowlist exact web origins, methods, and headers. Never combine credentialed CO
 | 5 | Replayed operation after deactivation, operation payload mismatch, stolen/cross-scope cursor, authorization-scope change, stale versions, local logout cleanup |
 | 6 | Cross-tenant object access, oversized/spoofed uploads, unauthorized hub group/resource, stale device association |
 | 7–8 | Dependency/security review, rate-limit/abuse checks, proxy/HTTPS config, restore drill, log redaction, native offline protection, final documented limits |
+
+## Admin web session boundary (Phase 3)
+
+The web client keeps access credentials only in module memory. Refresh credentials remain in the existing Secure/HttpOnly/SameSite=Strict API cookie, scoped to `/api/v1/auth/web`. Theme preference is the only localStorage value. Every cookie mutation obtains a fresh CSRF token: anonymous for login/register/refresh and bearer-bound for logout/organization selection. HTTPS, server Origin checks, JWT session validation and database authorization remain authoritative.
+
+A per-tab operation queue, a single-flight refresh promise and same-origin Web Locks serialize cookie refresh/login/logout/selection. A BroadcastChannel announces session changes without carrying credentials; other tabs clear their identity and bootstrap from the current cookie. Supported modern browsers provide Web Locks; older browsers fall back to per-tab serialization and backend replay detection still fails closed. A failed or ambiguous write is never automatically replayed. Requests have a bounded timeout and accept query cancellation.
+
+Query caches are keyed by tenant, user, role and session. Organization switching cancels queries and clears the cache; a request generation guard discards late responses from the previous organization. Login/logout also clear cached data. Roles in `/auth/me` are reconciled on focus and periodically, while every backend request revalidates membership. UI guards are only a convenience: the existing owner/manager/resource policies, composite foreign keys and transactional concurrency checks enforce access on the server.
+
+The UI renders strings as React text, including comments and audit metadata. It never injects user-supplied HTML or serializes whole entities into audit history. Existing append-only audit controls and before/after operational values are preserved.

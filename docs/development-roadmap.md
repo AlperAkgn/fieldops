@@ -40,7 +40,7 @@ Acceptance: a manager creates customer→location→asset→work order, schedule
 
 Build real authentication and protected routing, responsive layout/navigation, accessible forms, customers/locations/assets, work order list/create/detail/actions/history/checklist/comments, assignment UI, team/invitation management, and overview based on actual API aggregates. Add React Router, React Hook Form, Zod, Tailwind/component primitives, Lucide, and charts when their use cases land. Provide loading/error/empty states, confirmation/toasts, theme and localization structure; no inert navigation or placeholder actions.
 
-Acceptance: manager completes a real API-backed workflow through the web UI; mobile-width and keyboard behavior work; input/API failures are actionable; unauthorized routes/actions are rejected by API and represented correctly. Component/form/error/protection tests pass. Playwright covers login→customer→location→work order→technician assignment and observes Assigned. Rich scheduling/analytics remain Phase 6.
+Acceptance: manager completes a real API-backed workflow through the web UI; mobile-width and keyboard behavior work; input/API failures are actionable; unauthorized routes/actions are rejected by API and represented correctly. Component/form/error/protection tests pass. Playwright covers login→customer→location→work order→technician assignment and observes Assigned. The explicit Phase 3 authorization also includes daily/weekly scheduling and bounded operational reports. Drag-and-drop, realtime delivery, notifications, attachments and richer analytics remain Phase 6.
 
 ## Phase 4 — Technician Mobile App
 

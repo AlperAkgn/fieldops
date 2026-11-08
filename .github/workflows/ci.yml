@@ -74,6 +74,8 @@ jobs:
       - run: npm run ${{ matrix.client }}:test
       - if: matrix.client == 'web'
         run: npm run web:build
+      - if: matrix.client == 'web'
+        run: npm run format:check --workspace=@fieldops/admin-web
       - if: matrix.client == 'mobile'
         name: Check Expo dependency compatibility
         run: npx expo install --check
@@ -88,7 +90,7 @@ jobs:
   infrastructure:
     name: Docker infrastructure smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
@@ -118,6 +120,27 @@ jobs:
           docker compose run --rm migrate
       - name: Exercise HTTPS web authentication and Mailpit
         run: python3 infrastructure/scripts/smoke-web-auth.py --ca .certs/fieldops.crt
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install browser test dependencies
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Run real admin browser workflows
+        env:
+          FIELDOPS_E2E_MAIL: http://localhost:8025
+        run: |
+          docker compose -f docker-compose.yml -f infrastructure/docker/compose.e2e.yml up -d --wait api
+          npm run web:dev > /tmp/fieldops-vite.log 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 40); do
+            if curl --insecure --fail --silent https://localhost:5173/login > /dev/null; then break; fi
+            sleep 1
+          done
+          npm run test:e2e --workspace=@fieldops/admin-web
       - name: Inspect failures
         if: failure()
         run: docker compose logs --tail=100

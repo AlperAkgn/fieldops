@@ -124,6 +124,7 @@ app.UseRateLimiter();
 app.MapAuthEndpoints();
 app.MapOrganizationEndpoints();
 app.MapAuditEndpoints();
+app.MapReportingEndpoints();
 app.MapWorkOrderDetailEndpoints();
 app.MapCatalogEndpoints();
 app.MapWorkOrderEndpoints();

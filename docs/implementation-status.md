@@ -1,10 +1,10 @@
 # Implementation status
 
-Last updated: 2026-11-07 (Europe/Istanbul).
+Last updated: 2026-11-08 (Europe/Istanbul).
 
 ## Authorization boundary
 
-**Phases 0–2 are complete. Phase 2 audit remediation passed the local quality gate. Phases 3–8 have not started.** Phase 3 requires separate explicit authorization.
+**Phases 0–3 are complete. The last Phase 3 Save/focus defect passed targeted and full local regression after independent re-audit confirmed the other five findings resolved. Phases 4–8 have not started.** Phase 4 requires separate explicit authorization. Work used one agent only.
 
 ## Phase 0 revalidation (historical)
 
@@ -26,7 +26,7 @@ The revalidation superseded the historical first-run table below. The audit reco
 | 0 | Complete | Foundation and architecture |
 | 1 | Complete | Identity and multi-tenancy |
 | 2 | Complete | Core domain and API |
-| 3 | Not Started | Admin web dashboard |
+| 3 | Complete; final focus fix verified | Successful-save dialog focus restoration corrected |
 | 4 | Not Started | Technician mobile workflows |
 | 5 | Not Started | Offline-first synchronization |
 | 6 | Not Started | Real-time, notifications, attachments, scheduling, analytics |
@@ -182,23 +182,46 @@ Phase 2 used these identity and tenant boundaries for the core operational APIs.
 
 ### Pending tasks, limits and next steps
 
-The default database retains its original two migrations and requires the documented backup and rollout procedure. Hosted CI, external SMTP and native devices remain separate verification environments. The organization write lock is deliberately coarse and should be measured before changing its scope.
+At the Phase 2 close, the default database retained its original two migrations. Phase 3 subsequently completed the backed-up, rehearsed forward rollout described below. Hosted CI, external SMTP and native devices remain separate verification environments. The organization write lock is deliberately coarse and should be measured before changing its scope.
 
-After explicit Phase 3 authorization, build the admin web workflows against these APIs. [Phase 2 results and source inventory](phase-2-results.md) · [Migration rollout plan](phase-2-migration-plan.md)
+Phase 3 was subsequently authorized and implemented against these APIs. [Phase 2 results and source inventory](phase-2-results.md) · [Migration rollout plan](phase-2-migration-plan.md)
 
 ## Phase 3 — Admin web dashboard
 
-- Completed: no Phase 3 feature; Phase 0 health screen only.
-- Pending: authentication/protected routing, responsive navigation, real dashboard and customer/location/asset/work-order/team workflows, assignments/details, forms and loading/error/empty/confirmation states.
-- Blockers: authenticated core APIs and separate user authorization.
-- Verification: product UI/E2E not run. Plan component/form/error/protection checks and Playwright manager login→customer→location→work order→assignment against actual APIs.
-- Next steps: build real workflows after their backend contracts pass acceptance.
+### Final accessibility fix (current evidence, 2026-11-08)
+
+- Independent re-audit confirmed five resolved findings and one remaining Edit → successful Save → BODY focus defect. A new actual-browser regression failed first after PATCH 200/dialog close because Edit was not focused.
+- Root cause: successful-close callbacks run while the mutation is still pending, so the connected Edit trigger remains disabled during modal cleanup. Focus now falls back safely to main when restoration cannot succeed; the Edit owner restores the captured trigger in a layout effect after the mutation/refetch idle state and enabled DOM attribute have committed. No timers, observer workaround, mutation-rule weakening or component restructuring was introduced.
+- Only production files `components/ui.tsx` and `pages/WorkOrdersPage.tsx` changed for this fix. Added two `Modal.test.tsx` cases and one real API browser scenario. API errors preserve the modal/input; Escape, Tab/Shift+Tab, disabled-trigger state and actual trigger-unmount/main fallback all pass.
+- Verification: **58/58 web tests** (all existing 56 + 2 new), lint, strict typecheck, Prettier and production build pass. **12/12 Playwright E2E scenarios** (all existing 11 + the new focus regression) pass in one complete run, one worker, **zero skipped/retries**, about **2.8 minutes**, against real HTTPS/PostgreSQL/Mailpit on local Edge.
+- Backend code, authentication, concurrency, schemas and dependencies were untouched. The 227 backend tests were intentionally not rerun as requested. No user data was deleted. The existing approximately 503 kB main-bundle advisory and hosted/native/other-browser verification limits remain documented.
+- **Phase 4 readiness: READY for independent revalidation and explicit implementation authorization.** Stop here. [Focused accessibility report and changed files](phase-3-final-accessibility-fix.md)
+
+### Earlier quality-gate remediation (historical evidence)
+
+- Independent audit identified **four Medium (M1 version coordination, M2 mobile focus, M3 contrast, M4 invitation paging) and two Low (L1 modal positioning, L2 archived-template controls)** findings. All six were corrected with one agent; the earlier local implementation-only readiness claim is superseded.
+- Test-first evidence: a delayed checklist/detail refetch regression failed because Start remained enabled against the old version. The 2026-11-08 continuation preserved the existing six fixes and confirmed that regression fails with a source-external legacy-behavior adapter, then passes with the current implementation. Shared aggregate mutation state/locking, acknowledged versions, selective reconciliation and pending guards synchronize subsequent writes. Two additional tests verify failed reconciliation without write replay and lock ownership through refetch. Frozen snapshots and explicit reload preserve genuine concurrency errors; no backend rule was relaxed.
+- Offset/limit member and invitation lists now use one lookahead row without fabricated totals and retain Previous on empty pages. Archived templates are read-only. Native dialogs are centered, trap focus, restore focus/scroll and expose long content. Closed mobile navigation is inert/hidden to assistive technology and responds correctly to keyboard/breakpoint changes. The light caption contrast is **5.150:1**, versus the former 4.079:1; measured light/dark normal-text samples pass 4.5:1.
+- Final verification (2026-11-08): web lint, strict typecheck, Prettier and production build pass; **56/56 web tests** (original 40 + 16 regression cases) pass. **11/11 real HTTPS/PostgreSQL/Mailpit Playwright scenarios** (all original 8 + 3 new) pass in one complete run, **zero skipped/retries**, one worker, about **2.6 minutes**. Each scenario has an independent organization, fresh sessions and operational fixtures; email matching prevents old invitation reuse. Responsive/modal/focus/contrast checks pass at **375, 768 and 1440 px**. Screenshots now use per-test output paths, preserving earlier evidence.
+- Backend Release build **zero warnings/errors**, format pass, **227/227 tests (92 unit + 135 real PostgreSQL integration), zero skipped**, confirmed in one full invocation. Normal-limit isolated Docker trusted HTTPS/CORS/CSRF/SMTP/refresh/logout/429 smoke passes. Current logs, TRX and HTML browser evidence are under ignored `artifacts/phase-3-remediation-20261108`. The default database retained **0 users / 0 organizations / 6 migrations**; no user volumes were deleted. Backend sources, schemas and dependencies were unchanged.
+- Remaining limits: Vite reports the approximately 502 kB main bundle advisory (153 kB gzip); no threshold was raised. Hosted CI, other browser engines, native devices, production and external SMTP remain unverified environments. Existing dependency-advisory history is unchanged; no new audit is claimed. No unresolved finding from M1–M4/L1–L2 remains in the tested scope.
+- **Phase 4 readiness: READY for independent revalidation and explicit implementation authorization.** Stop before Phase 4. [Eleven-section remediation report](phase-3-quality-gate-remediation.md)
+
+### Original Phase 3 implementation evidence (historical)
+
+- Completed: real login/registration/activation/recovery, secure sessions and workspace switching; responsive navigation/theme/accessibility; customer/location/asset/category CRUD/archive and completed service history; versioned work-order create/edit/schedule/assign/status, comments, checklists/templates and structured audit history; daily/weekly calendar and reasoned conflict override; owner team/invitation/profile administration, restricted manager technician lookup, reports and settings.
+- Architecture: existing modular monolith and authentication/write boundaries preserved. Added only policy/tenant-scoped read-only report and technician queries. Reports use one PostgreSQL repeatable-read snapshot. Access tokens stay in memory; existing Secure HttpOnly refresh cookies, identity-bound CSRF and Origin checks remain authoritative. Queues/Web Locks serialize rotation; cross-tab broadcasts carry no credentials. Cache keys include tenant/user/role/session, and late tenant responses are rejected.
+- Database: backed up the default database and Data Protection keys; restored the dump into a separate PostgreSQL container; verified upgrade and clean-schema installation. Applied the four pending Phase 1/2 migrations safely with the old API stopped, preserved all development volumes, verified six migration entries and unchanged zero user/organization counts, then passed idempotent reapplication and HTTP/trusted HTTPS health. No new Phase 3 migration was required. [Rollout evidence](phase-3-migration-plan.md)
+- Verification: backend Release build zero warnings/errors and format pass; **227 backend tests passed (92 unit + 135 actual PostgreSQL integration), zero skipped**. All original 222 tests remain. Web lint, strict typecheck, production build and Prettier check pass; **40 web tests passed**. **8 real Playwright E2E scenarios passed**, one worker, zero retries, on local Edge: manager CRUD/assignment/required checklist/completion, override/audit values, SMTP-backed registration/recovery, workspace/cache switching/logout, viewer UI/API denial, responsive/dark/keyboard behavior, owner administration and two-tab rotating-cookie/session coordination. Mobile lint/typecheck, **23 tests**, and Expo dependency compatibility pass. Docker build/Compose/health and actionlint pass locally.
+- Limits: hosted CI, external SMTP and native device execution were not run. Downloaded Chromium failed to spawn on this Windows host; installed Edge executed the full browser suite. Admin web runtime dependency audit has zero findings; the existing Expo CLI/glob/minimatch chain has five moderate runtime-audit findings. Profile fields are read-only apart from existing password/session controls. Calendar times use the labeled browser zone; bounded reports are documented. No public deployment or unsupported feature is claimed.
+- Pending: no Phase 3 functional blocker found in the implemented scope. Rich analytics, drag/drop, realtime, notifications and attachments remain later work. Full release hardening and other browser/native environments retain their separate gates.
+- Next steps: stop and await explicit Phase 4 authorization; then implement the supported online technician flow and verify it on a native target. **Phase 4 readiness: READY for implementation.** [Detailed Phase 3 report](phase-3-results.md) · [Changed files](phase-3-files.md)
 
 ## Phase 4 — Technician mobile app
 
 - Completed: no Phase 4 feature; Expo Router/health foundation only.
 - Pending: authentication/SecureStore, assigned tasks/details, map linking, checklist/notes/time/status actions, API/loading/errors and logout cleanup.
-- Blockers: backend workflows, separate user authorization and supported native test target.
+- Blockers: separate user authorization and supported native test target; backend workflows are available.
 - Verification: technician flows not run. Plan session/transport/component tests and an online technician lifecycle on device/emulator.
 - Next steps: finish the online flow before offline mutations.
 
@@ -212,8 +235,8 @@ After explicit Phase 3 authorization, build the admin web workflows against thes
 
 ## Phase 6 — Advanced features
 
-- Completed: local MinIO infrastructure only; no Phase 6 feature.
-- Pending: tenant/resource-scoped SignalR, transactional delivery, in-app/push notifications/device lifecycle, safe attachments/camera/gallery, calendar/history/conflicts and actual analytics.
+- Completed: local MinIO infrastructure; basic daily/weekly calendar, conflict/audit UI and bounded reports were explicitly delivered in Phase 3. The Phase 6 milestone itself has not started.
+- Pending: tenant/resource-scoped SignalR, transactional delivery, in-app/push notifications/device lifecycle, safe attachments/camera/gallery, richer scheduling/drag-and-drop and deeper analytics.
 - Blockers: core workflows, separate authorization, maintained storage reassessment and native push credentials for delivery acceptance.
 - Verification: not run. Plan recipient isolation/retries, safe upload/download, concurrent/DST schedule conflicts and database-backed statistics.
 - Next steps: reassess storage and implement each feature with its real client workflow.

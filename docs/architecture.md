@@ -69,3 +69,15 @@ Docker Compose provides local PostgreSQL, API, and MinIO infrastructure. MinIO a
 ## Alternatives and evolution
 
 Microservices would add deployments, distributed consistency, and tenant context propagation without a current scaling need; keep the modular monolith. EF already supplies unit-of-work/change-tracking behavior, so avoid a generic repository wrapper. Redis, background-job frameworks, and additional infrastructure require measured or concrete needs. See [ADR 0001](adr/0001-architecture.md) for accepted choices and consequences.
+
+## Phase 3 admin web
+
+The React application uses declarative React Router routes, TanStack Query for server state, React Hook Form/Zod for forms and a small accessible component system styled with Tailwind/CSS variables. The system includes native modal dialogs, reusable validation/error states, paged lookup selectors, server-side tables, responsive navigation and light/dark themes. Charts are lazy-loaded separately from the main application bundle.
+
+Features are organized under `apps/admin-web/src/pages`, with shared transport/contracts/session helpers under `api` and reusable primitives under `components`. The API client owns memory-only credentials, serialized cookie operations, CSRF, cancellation and tenant-generation checks. Pages contain no direct refresh-token handling. Work-order mutations carry the latest aggregate version and require user retry after conflicts; archive operations preserve service history.
+
+The only backend additions are `IReportingReader` in Application, its EF implementation in Infrastructure, and policy-protected read endpoints in API. Domain rules and the Phase 1/2 write transaction boundaries are unchanged. Aggregate reports use PostgreSQL repeatable read so counts and charts describe one committed snapshot. Technician lookup deliberately exposes fewer fields than owner-only membership administration.
+
+The user explicitly included daily/weekly scheduling and bounded operational reports in Phase 3. SignalR, notifications, attachments, drag-and-drop scheduling and richer analytics remain Phase 6.
+
+The Phase 3 quality-gate remediation adds a scoped work-order write coordinator. Parent actions, checklist/comments and scheduling/assignment forms share aggregate pending state and a QueryClient-local write lock. Acknowledged server versions update detail/checklist cache before selective refetch; controls remain pending through reconciliation. Dialogs retain their edit snapshot, and a stale command is rejected rather than upgraded to another actor's version. A user explicitly reloads and retries real conflicts. The backend optimistic-concurrency and transaction contracts are unchanged. Offset-array member/invitation lists use one lookahead record to determine Next without fabricating totals.

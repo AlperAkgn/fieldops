@@ -2,7 +2,7 @@
 
 Manage field operations, empower technicians, and keep every service job under control.
 
-FieldOps is a multi-tenant field service management platform in development. The Phase 3 admin workspace connects customer, equipment, scheduling and work-order workflows to the verified identity and operational APIs. The technician mobile workflows are the next authorized milestone.
+FieldOps is a multi-tenant field service management platform in development. The admin workspace and Phase 4 online technician app connect customer, equipment, scheduling and work-order workflows to the verified identity and operational APIs. Mobile native-device acceptance remains an explicit environment gate. [Mobile setup and verification](docs/mobile.md)
 
 ## Problem and product scope
 
@@ -22,7 +22,7 @@ The first release targets general field service operations rather than a single 
 - Separate process liveness and database/migration readiness endpoints, structured JSON logs, safe ProblemDetails responses, and development OpenAPI.
 - A responsive React admin workspace with secure cookie authentication, organization switching, role-aware routes, customer/location/asset CRUD, work-order actions, assignments, comments, checklists and structured audit history.
 - Actual PostgreSQL-backed overview/report aggregates, daily/weekly scheduling, conflict/override forms, owner-controlled team administration and session settings.
-- An Expo Router foundation that inspects API health; technician mobile workflows remain Phase 4.
+- An Expo technician app with protected sessions, workspace selection, assigned tasks, customer/site/asset details, maps, versioned status/checklist/service-note actions and profile/logout. Offline work remains Phase 5.
 - Local PostgreSQL, API, migration job, Mailpit email capture, and MinIO using Docker Compose.
 - Locked dependencies, backend architecture/health/database tests, client transport tests, and a GitHub Actions workflow.
 
@@ -34,7 +34,7 @@ Implementation evidence and phase gates are tracked in [implementation status](d
 | --- | --- |
 | Backend | C# / ASP.NET Core 10, EF Core 10, Npgsql PostgreSQL provider |
 | Admin web | React 19, strict TypeScript, Vite 8, Tailwind 4, React Router, TanStack Query, React Hook Form/Zod, Recharts, Lucide |
-| Mobile | Expo SDK 58, React Native 0.88, Expo Router, TypeScript strict mode |
+| Mobile | Expo SDK 58, React Native 0.88, Expo Router, SecureStore, TanStack Query, TypeScript strict mode |
 | Database | PostgreSQL 18.6 |
 | Local infrastructure | Docker Compose, non-root API and MinIO containers |
 | Verification | xUnit, ASP.NET Core test host, real PostgreSQL, Vitest, ESLint, TypeScript |
@@ -63,7 +63,7 @@ The backend is a modular monolith. Domain owns organization and session rules. A
 ```text
 apps/
   admin-web/                  React/Vite foundation
-  mobile/                     Expo Router foundation
+  mobile/                     Expo online technician application
 backend/
   src/                        Api, Application, Domain, Infrastructure
   tests/                      UnitTests, IntegrationTests
@@ -118,11 +118,12 @@ Docker Compose and the Vite development server share the certificate settings in
 # apps/admin-web/.env.local
 VITE_API_BASE_URL=https://localhost:5443
 
-# apps/mobile/.env.local — use your host LAN address on a physical phone
-EXPO_PUBLIC_API_BASE_URL=http://192.168.1.100:5080
+# apps/mobile/.env.local — the device must trust a certificate valid for this host
+EXPO_PUBLIC_API_BASE_URL=https://localhost:5443
+EXPO_PUBLIC_ALLOW_INSECURE_HTTP=false
 ```
 
-API URLs must be HTTP(S) origins, optionally ending in `/`, with no credentials, path, query, or fragment. Android emulator can reach the host at `http://10.0.2.2:5080`. A phone's `localhost` refers to the phone. Public client configuration must never contain passwords or tokens. The API uses `ConnectionStrings__Database` when run outside Compose. Connection strings and local credentials belong in environment variables or .NET user secrets.
+API URLs must be origins, optionally ending in `/`, with no credentials, path, query, or fragment. Mobile requires HTTPS; private local HTTP requires an explicit debug-only opt-in. Android emulators reach the host through `10.0.2.2`; a phone's `localhost` refers to the phone. A localhost certificate does not automatically cover either address. See [mobile setup](docs/mobile.md) for trusted TLS, debug options, native tooling and the actual integration command. Public client configuration must never contain passwords or tokens. The API uses `ConnectionStrings__Database` when run outside Compose. Connection strings and local credentials belong in environment variables or .NET user secrets.
 
 ## Database and migrations
 
@@ -174,7 +175,7 @@ Phase 5 will use Expo SQLite, a durable local outbox, server-side operation idem
 
 ## Screenshots and demo
 
-The admin web now runs actual operational workflows. Playwright produces desktop, dark-theme and mobile-width screenshots in the ignored `artifacts/phase-3` directory; its accounts are disposable local test fixtures. The mobile app remains the health foundation. No public demo or deployed credentials are available; a reusable product demo seed remains Phase 8.
+The admin web runs actual operational workflows. Playwright produces desktop, dark-theme and mobile-width screenshots in ignored artifact directories; its accounts are disposable local test fixtures. The mobile app has online technician screens, component tests and real API/PostgreSQL tests. Native Android/iOS execution is a separate pending environment gate; no device screenshots or passing native run are claimed. No public demo or deployed credentials are available; a reusable product demo seed remains Phase 8.
 
 ## Roadmap
 

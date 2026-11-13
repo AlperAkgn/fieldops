@@ -6,9 +6,37 @@
     "orientation": "portrait",
     "scheme": "fieldops",
     "userInterfaceStyle": "light",
-    "plugins": ["expo-router"],
-    "experiments": { "typedRoutes": true },
-    "ios": { "supportsTablet": true, "bundleIdentifier": "com.fieldops.mobile" },
-    "android": { "package": "com.fieldops.mobile" }
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-font",
+      "./plugins/with-validation-tls.mjs"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.fieldops.mobile"
+    },
+    "android": {
+      "package": "com.fieldops.mobile",
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.VIBRATE"
+      ]
+    },
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "4d72c8be-3126-46ba-9890-72686a06baf7"
+      }
+    },
+    "owner": "alperakgn"
   }
 }

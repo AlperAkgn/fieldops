@@ -69,6 +69,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - run: npm ls --all --json > /dev/null
       - run: npm run ${{ matrix.client }}:lint
       - run: npm run ${{ matrix.client }}:typecheck
       - run: npm run ${{ matrix.client }}:test
@@ -76,6 +77,8 @@ jobs:
         run: npm run web:build
       - if: matrix.client == 'web'
         run: npm run format:check --workspace=@fieldops/admin-web
+      - if: matrix.client == 'mobile'
+        run: npm run format:check --workspace=@fieldops/mobile
       - if: matrix.client == 'mobile'
         name: Check Expo dependency compatibility
         run: npx expo install --check
@@ -141,6 +144,12 @@ jobs:
             sleep 1
           done
           npm run test:e2e --workspace=@fieldops/admin-web
+      - name: Run mobile HTTP and session integration against PostgreSQL
+        env:
+          FIELDOPS_MOBILE_TEST_API: https://localhost:5443
+          FIELDOPS_MOBILE_TEST_MAIL: http://localhost:8025
+          NODE_EXTRA_CA_CERTS: ${{ github.workspace }}/.certs/fieldops.crt
+        run: npm run test:integration --workspace=@fieldops/mobile
       - name: Inspect failures
         if: failure()
         run: docker compose logs --tail=100

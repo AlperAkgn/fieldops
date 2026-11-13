@@ -8,5 +8,13 @@
     "noUnusedParameters": true,
     "types": ["react", "node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts", "vitest.config.mts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "integration/**/*.ts",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts",
+    "vitest*.mts",
+    "jest.setup.ts"
+  ]
 }

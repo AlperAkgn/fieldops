@@ -5,25 +5,43 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "format:check": "prettier --check .",
+    "test": "vitest run && jest --runInBand",
+    "test:components": "jest --runInBand",
+    "test:integration": "vitest run --config vitest.integration.config.mts",
     "export": "expo export --platform android --platform ios",
     "check": "expo install --check",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "android:preflight": "node scripts/android-validation-preflight.mjs"
   },
   "dependencies": {
+    "@expo/vector-icons": "15.0.2",
     "@tanstack/react-query": "5.106.1",
-    "expo": "58.0.23",
-    "expo-constants": "58.0.15",
-    "expo-linking": "58.0.16",
-    "expo-router": "58.0.30",
-    "expo-status-bar": "58.0.4",
+    "expo": "58.0.24",
+    "expo-constants": "58.0.16",
+    "expo-dev-client": "58.0.19",
+    "expo-font": "58.0.12",
+    "expo-linking": "58.0.17",
+    "expo-router": "58.0.31",
+    "expo-secure-store": "58.0.3",
+    "expo-status-bar": "58.0.5",
+    "expo-system-ui": "58.0.7",
     "react": "19.3.0",
     "react-native": "0.88.1",
     "react-native-safe-area-context": "5.11.1",
     "react-native-screens": "4.30.1"
+  },
+  "devDependencies": {
+    "@react-native/jest-preset": "0.88.1",
+    "@testing-library/react-native": "13.3.3",
+    "@types/jest": "30.0.0",
+    "jest": "30.5.2",
+    "jest-expo": "58.0.14",
+    "prettier": "3.9.10",
+    "react-test-renderer": "19.3.0"
   }
 }

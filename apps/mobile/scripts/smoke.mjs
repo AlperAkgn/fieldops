@@ -18,17 +18,25 @@ const port = reservation.address().port;
 await new Promise((resolve) => reservation.close(resolve));
 
 const baseUrl = `http://localhost:${port}`;
-const child = spawn(process.execPath, [require.resolve('expo/bin/cli'), 'start', '--host', 'localhost', '--port', String(port)], {
-  cwd: projectRoot,
-  env: { ...process.env, CI: '1', EXPO_NO_TELEMETRY: '1' },
-  stdio: ['ignore', 'pipe', 'pipe'],
-  windowsHide: true,
-});
+const child = spawn(
+  process.execPath,
+  [require.resolve('expo/bin/cli'), 'start', '--host', 'localhost', '--port', String(port)],
+  {
+    cwd: projectRoot,
+    env: { ...process.env, CI: '1', EXPO_NO_TELEMETRY: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  },
+);
 let output = '';
 let spawnError;
-child.on('error', (error) => { spawnError = error; });
+child.on('error', (error) => {
+  spawnError = error;
+});
 for (const stream of [child.stdout, child.stderr]) {
-  stream.on('data', (chunk) => { output = (output + chunk.toString()).slice(-12_000); });
+  stream.on('data', (chunk) => {
+    output = (output + chunk.toString()).slice(-12_000);
+  });
 }
 
 try {
@@ -36,11 +44,14 @@ try {
   let running = false;
   while (Date.now() < deadline) {
     if (spawnError) throw spawnError;
-    if (child.exitCode !== null || child.signalCode !== null) throw new Error('Expo exited before the startup smoke check completed.');
+    if (child.exitCode !== null || child.signalCode !== null)
+      throw new Error('Expo exited before the startup smoke check completed.');
     try {
       const status = await fetch(`${baseUrl}/status`, { signal: AbortSignal.timeout(1_500) });
       running = status.ok && (await status.text()) === 'packager-status:running';
-    } catch { /* The server is still starting. */ }
+    } catch {
+      /* The server is still starting. */
+    }
     if (running) break;
     await delay(250);
   }
@@ -52,7 +63,8 @@ try {
   });
   if (!response.ok) throw new Error(`Native manifest request failed (${response.status}).`);
   const manifest = await response.json();
-  if (typeof manifest.launchAsset?.url !== 'string') throw new Error('The Android manifest has no launch bundle.');
+  if (typeof manifest.launchAsset?.url !== 'string')
+    throw new Error('The Android manifest has no launch bundle.');
   const bundleUrl = new URL(manifest.launchAsset.url);
   const bundle = await fetch(new URL(bundleUrl.pathname + bundleUrl.search, baseUrl), {
     signal: AbortSignal.timeout(90_000),
@@ -62,14 +74,18 @@ try {
   }
   const bundleSize = (await bundle.arrayBuffer()).byteLength;
   if (bundleSize === 0) throw new Error('Metro returned an empty Android development bundle.');
-  process.stdout.write(`Expo startup, Android manifest, and native HTTP bundle passed (${bundleSize} bytes).\n`);
+  process.stdout.write(
+    `Expo startup, Android manifest, and native HTTP bundle passed (${bundleSize} bytes).\n`,
+  );
 } catch (error) {
   process.stderr.write(output);
   throw error;
 } finally {
   if (child.exitCode === null && child.signalCode === null) {
     if (process.platform === 'win32') {
-      await promisify(execFile)('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }).catch(() => {});
+      await promisify(execFile)('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+        windowsHide: true,
+      }).catch(() => {});
     } else {
       child.kill('SIGTERM');
       await Promise.race([new Promise((resolve) => child.once('exit', resolve)), delay(2_000)]);

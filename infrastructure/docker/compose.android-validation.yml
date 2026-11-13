@@ -1,0 +1,7 @@
+services:
+  api:
+    environment:
+      ASPNETCORE_ENVIRONMENT: AndroidValidation
+    ports: !override
+      - "${FIELDOPS_ANDROID_LAN_IP:?Set the validation PC LAN IPv4 address}:5451:8443"
+      - "127.0.0.1:5452:8443"

@@ -1,10 +1,10 @@
 # Implementation status
 
-Last updated: 2026-11-08 (Europe/Istanbul).
+Last updated: 2026-11-12 (Europe/Istanbul).
 
 ## Authorization boundary
 
-**Phases 0–3 are complete. The last Phase 3 Save/focus defect passed targeted and full local regression after independent re-audit confirmed the other five findings resolved. Phases 4–8 have not started.** Phase 4 requires separate explicit authorization. Work used one agent only.
+**Phases 0–3 are complete. Phase 4 online functionality and automated regression are implemented. The EAS APK and HTTPS setup are prepared for the Galaxy A34.** Phase 5 readiness is **NOT READY** pending the operator's cloud build and device acceptance. [Android validation handoff](phase-4-android-validation.md)
 
 ## Phase 0 revalidation (historical)
 
@@ -219,17 +219,19 @@ Phase 3 was subsequently authorized and implemented against these APIs. [Phase 2
 
 ## Phase 4 — Technician mobile app
 
-- Completed: no Phase 4 feature; Expo Router/health foundation only.
-- Pending: authentication/SecureStore, assigned tasks/details, map linking, checklist/notes/time/status actions, API/loading/errors and logout cleanup.
-- Blockers: separate user authorization and supported native test target; backend workflows are available.
-- Verification: technician flows not run. Plan session/transport/component tests and an online technician lifecycle on device/emulator.
-- Next steps: finish the online flow before offline mutations.
+- Completed: Expo Router protected sign-in/tabs/detail; SecureStore refresh-only persistence, memory access credentials, serialized/deduplicated rotation with interruption markers, workspace selection and cache/late-response isolation; technician Today/assigned-task search/status/priority/pagination/pull-refresh; customer/site/contact/asset/team details and maps; versioned checklist, service notes, start/pause/resume/complete, server actual times/history; profile, recovery request and logout. No backend/API/schema/security contract was changed. [Mobile setup and architecture](mobile.md)
+- Verification: clean `npm ci` and complete peer tree; mobile lint, strict typecheck, Prettier, **55 Vitest tests (all 23 original health tests retained) + 13 native-component tests**; **7 real HTTPS API/PostgreSQL mobile integration tests**, zero skipped. Expo compatibility and Doctor **20/20**, Android/iOS Hermes JavaScript export, Metro startup/Android manifest/HTTP-bundle smoke, Android prebuild and static backup/permission configuration checks passed. Backend Release build **zero warnings/errors**, **227 tests (92 unit + 135 PostgreSQL integration)** passed; web lint/typecheck/build and **58 existing tests** passed; actionlint and Git whitespace checks passed. Logout-interruption and stale-401/workspace races were reproduced with failing tests and fixed before final regression. [Full results and commands](phase-4-results.md)
+- Database safety: fresh `fieldops-phase4` Compose project on isolated ports; the existing migration chain applied there without new migrations. Backend tests used generated disposable databases on that isolated PostgreSQL server. The default development database was not migrated, seeded or deleted; its readiness still reports Healthy. An initial backend test attempt was interrupted after IPv6 `localhost` connection stalls; the complete rerun with `Host=127.0.0.1` passed in about 64 seconds for the integration assembly.
+- Android follow-up on 2026-11-12: prepared the EAS `android-validation` and `development` APK profiles, SDK 58 patch alignment, archive rules and HTTPS staging/LAN options. Local EAS profile and archive checks, locked install and peer tree, Expo compatibility, Android prebuild, Hermes export, TLS checks and 55 Vitest plus 13 component tests succeeded. [Preparation evidence](phase-4-android-validation.md#preparation-evidence-from-2026-11-12)
+- Blockers: Expo project linking, cloud build, APK installation and all 14 Galaxy A34 checks await the operator. The local Docker engine was unavailable during preparation, so LAN stack startup and PostgreSQL readiness still need to be checked. Local SDK/ADB are absent.
+- Remaining: complete the documented device acceptance flow and independent review. Root dependency audit reports **33 advisories (32 moderate, 1 low; zero high/critical)** through the build/test toolchain (`glob`, `minimatch`, `deepmerge` and dependent packages); no compatible forced SDK/toolchain downgrade was applied. The pre-existing optional Ajv peer mismatch was fixed with a pinned compatible web development dependency; the complete peer tree passes. The prior web approximately 503 kB bundle advisory remains visible.
+- Next steps: follow the [Android validation handoff](phase-4-android-validation.md) to configure HTTPS, build and install the APK, and record the actual device results before Phase 5 authorization. [Original Phase 4 report](phase-4-results.md) · [Original changed files](phase-4-files.md)
 
 ## Phase 5 — Offline-first system
 
 - Completed: design only; no offline implementation.
 - Pending: SQLite/cache/outbox, local atomic updates, sync receipts/idempotency, versions/conflicts, committed-order authorized pull cursors, tombstones/revocations, retry/recovery, offline indicator and sync center.
-- Blockers: online technician flow, replay/retention decisions, native persistence/encryption verification and separate authorization.
+- Blockers: Phase 4 native acceptance, replay/retention decisions, native persistence/encryption verification and separate authorization.
 - Verification: not run. Plan duplicates, interruptions/restarts, retry, delayed commits, conflicts, authorization changes, protocol/version mismatch and failure recovery.
 - Next steps: implement and verify the local/server protocol before enabling offline claims.
 

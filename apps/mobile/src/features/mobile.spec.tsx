@@ -11,8 +11,23 @@ import { OrdersScreen } from './OrdersScreen';
 import { withOrderLock } from './queries';
 import Profile from '../app/(tabs)/profile';
 import { Linking } from 'react-native';
+import * as Network from 'expo-network';
+import { OfflineProvider } from '../offline/runtime';
+import { openOfflineVault } from '../offline/vault';
+import type { OfflineSnapshot, OfflineStore } from '../offline/store';
+import WorkOrderRoute from '../app/work-orders/[id]';
+jest.mock('expo-crypto', () => ({ randomUUID: () => '9f08cfe4-4811-41ca-983e-b6333994bf04' }));
+jest.mock('expo-network', () => ({
+  getNetworkStateAsync: jest.fn(),
+  addNetworkStateListener: jest.fn(),
+}));
+jest.mock('../offline/vault', () => ({
+  openOfflineVault: jest.fn(),
+  removeOfflineVault: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+}));
 jest.mock('expo-router', () => ({
   Redirect: () => null,
+  useLocalSearchParams: () => ({ id: 'order' }),
   router: {
     push: jest.fn(),
     navigate: jest.fn(),
@@ -86,6 +101,13 @@ function fixture() {
         emailConfirmed: true,
       });
     if (path === '/auth/logout') return response(null, 204);
+    if (path.startsWith('/sync/pull'))
+      return response({
+        cursor: 'cursor',
+        hasMore: false,
+        serverTime: new Date().toISOString(),
+        orders: [],
+      });
     if (path === '/organizations')
       return response([
         {
@@ -213,6 +235,72 @@ beforeEach(() => {
   calls = [];
 });
 describe('native technician components', () => {
+  it('switches to the downloaded order on network loss and keeps a service note draft', async () => {
+    const ctx = fixture();
+    await ctx.session.login('a', 'b');
+    let broadcast: ((state: Network.NetworkStateEvent) => void) | undefined;
+    jest.mocked(Network.getNetworkStateAsync).mockResolvedValue({ isConnected: true });
+    jest.mocked(Network.addNetworkStateListener).mockImplementation((listener) => {
+      broadcast = listener;
+      return { remove: jest.fn() };
+    });
+    const enqueue = jest.fn<OfflineStore['enqueue']>().mockResolvedValue(undefined);
+    const work = { ...initialOrder, createdAt: '', updatedAt: '' };
+    const snapshot: OfflineSnapshot = {
+      cursor: 'cursor',
+      lastSync: Date.now(),
+      rebuilding: false,
+      removed: 0,
+      retryAt: 0,
+      operations: [],
+      orders: [
+        {
+          order: work as OfflineSnapshot['orders'][number]['order'],
+          notes: [],
+          checklist: {
+            workOrderId: work.id,
+            workOrderVersion: work.version,
+            totalItems: 0,
+            completedItems: 0,
+            progressPercent: 0,
+            requiredItemsComplete: true,
+            items: [],
+          },
+        },
+      ],
+    };
+    const vault = {
+      snapshot: async () => snapshot,
+      applyPage: async () => {},
+      enqueue,
+    };
+    jest
+      .mocked(openOfflineVault)
+      .mockResolvedValue(vault as unknown as Awaited<ReturnType<typeof openOfflineVault>>);
+    ctx.mount(
+      <OfflineProvider>
+        <WorkOrderRoute />
+      </OfflineProvider>,
+    );
+    fireEvent.press(await screen.findByText('Notes'));
+    fireEvent.changeText(await screen.findByLabelText('Service note'), 'Retain this draft');
+    await waitFor(() => expect(calls.some(({ path }) => path.startsWith('/sync/pull'))).toBe(true));
+    await act(async () => broadcast?.({ isConnected: false }));
+    expect(await screen.findByText('Offline')).toBeOnTheScreen();
+    expect(screen.getByDisplayValue('Retain this draft')).toBeOnTheScreen();
+    fireEvent.press(screen.getByRole('button', { name: 'Save note' }));
+    await waitFor(() =>
+      expect(enqueue).toHaveBeenCalledWith(expect.any(String), 'order', 5, {
+        kind: 'note',
+        body: 'Retain this draft',
+      }),
+    );
+    expect(
+      calls.some(
+        ({ path, body }) => (path.includes('/comments') && 'body' in body) || path === '/sync/push',
+      ),
+    ).toBe(false);
+  });
   it('applies an accessible status filter through the API', async () => {
     const ctx = fixture();
     await ctx.session.login('a', 'b');

@@ -29,13 +29,20 @@ import {
 import { dateTime, mapUrl, message, statusLabel } from './orders';
 import { useOrder, useOrderWrite, useWorkspace } from './queries';
 
-export function WorkOrderScreen({ id }: { id: string }) {
+export function WorkOrderScreen({
+  id,
+  noteDraft,
+}: {
+  id: string;
+  noteDraft?: [string, (value: string) => void];
+}) {
   const { detail, checklist, key, api, sessionBusy } = useOrder(id);
   const workspace = useWorkspace();
   const write = useOrderWrite(id);
   const client = useQueryClient();
   const [tab, setTab] = useState<'Checklist' | 'Notes' | 'History'>('Checklist');
-  const [note, setNote] = useState('');
+  const localNote = useState('');
+  const [note, setNote] = noteDraft ?? localNote;
   const [error, setError] = useState('');
   const [needsReload, setNeedsReload] = useState(false);
   const [notePage, setNotePage] = useState(1);

@@ -10,7 +10,8 @@
       "expo-router",
       "expo-secure-store",
       "expo-font",
-      "./plugins/with-validation-tls.mjs"
+      "./plugins/with-validation-tls.mjs",
+      ["expo-sqlite", { "useSQLCipher": true, "enableFTS": false }]
     ],
     "experiments": {
       "typedRoutes": true

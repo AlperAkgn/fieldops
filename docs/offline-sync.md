@@ -1,83 +1,38 @@
-# Offline synchronization design
+# Technician offline synchronization
 
-## Delivery status and supported scope
+Phase 5 implements protocol 1. Native-device acceptance remains conditional. The local workflow requires a new Android/iOS build with Expo SQLite and SQLCipher. Create an authorized download by signing in, selecting a Technician workspace over HTTPS, and checking the last download in **Sync**.
 
-This is the **Phase 5 design**, not an implemented Phase 0 capability. Phase 4 supplies authenticated technician flows first. Phase 0's health screen does not persist operational data or imply offline availability.
-
-Initial offline support covers previously synchronized authorized tasks, supported state changes, checklist updates, service notes, and time recording. Initial login, assignment changes, membership/organization administration, and critical manager commands require connectivity. Photo capture/upload queuing is deferred until a separate tested design exists.
-
-## Local data and outbox
-
-SQLite stores a minimized task projection, checklist snapshots, authorized comments, server versions, a pull cursor/scope generation, and pending operations. Partition by account/tenant; never show the prior scope while another user or organization loads. SecureStore holds credentials and, in an approved encrypted native build, the database encryption key. See [security.md](security.md) for encryption and offline revocation limitations.
-
-| Outbox field | Purpose |
+| Available offline | Requires the API |
 | --- | --- |
-| OperationId | Client-generated UUID, stable across transport retries |
-| EntityId / OperationType | Explicit allowed command target and action |
-| Payload | Validated command data, without TenantId authority |
-| ExpectedVersion | Server aggregate version on which the command depends |
-| ClientCreatedAt | Client observation time; never trusted as server audit time |
-| SyncStatus | Pending, InFlight, Succeeded, Conflict, Rejected, or RetryWaiting |
-| RetryCount / NextAttemptAt | Bounded retry scheduling and diagnostics |
-| Local sequence / dependency | Preserves order of commands for the same aggregate |
+| Downloaded assigned work orders, description, schedule/status, checklist, and up to 10 recent technician-visible notes per order | Initial login, workspace changes, new assignments, detailed contacts/maps, history and additional note pages |
+| Checklist item updates, new technician-visible service notes, start, pause, resume and completion | Creating, scheduling, assigning, reopening or canceling work orders, checklist-template administration and internal notes |
 
-One local transaction updates the visible local projection and appends its outbox command. A crash cannot retain the UI change without the pending operation. Send commands serially per aggregate and preserve dependencies: later local commands depend on their predecessor's acknowledged resulting version. A conflict holds the dependent tail for review; do not silently rewrite ExpectedVersion and replay stale intent. Other independent work orders can continue synchronizing.
+The client retains the time each offline action was captured. The server records this separately in the successful receipt and continues to use server time for execution state, audit and business rules. The state machine, required checklist checks and current assignment are revalidated on application. Photo and attachment queues are deferred.
 
-```mermaid
-sequenceDiagram
-    participant UI as Technician UI
-    participant DB as Local SQLite
-    participant Sync as Sync service
-    participant API as ASP.NET API
-    participant PG as PostgreSQL
-    UI->>DB: Atomic local change + pending operation
-    Sync->>DB: Read pending operations in dependency order
-    Sync->>API: Push stable OperationId + ExpectedVersion
-    API->>API: Authenticate and authorize current membership/resource
-    API->>PG: Transaction: receipt + versioned mutation + audit + feed
-    PG-->>API: Commit result
-    API-->>Sync: Applied / duplicate / conflict / rejected
-    Sync->>DB: Atomic receipt + authoritative version/projection
-    Sync->>API: Pull after authorized opaque cursor
-    API-->>Sync: Authorized changes/tombstones + next cursor
-    Sync->>DB: Atomic changes + cursor advancement
-```
+## Local storage and recovery
 
-## Push, atomic receipts, and idempotency
+Expo SQLite stores an authoritative minimized order projection and a typed outbox. An offline change becomes visible through the outbox rows committed in the same local transaction. Dependent edits use their predecessor's predicted next version. Each command has a stable UUID, target, expected version, allowlisted payload, client capture time, sequence, state, attempts and next retry time. The client queues at most 200 edits. An interrupted `sending` row reopens as retryable with the same UUID. An ambiguous Phase 4 direct online write is never converted into a new offline operation automatically.
 
-`POST /api/v1/sync/push` accepts a bounded batch and returns a result for each operation. Batches are not one cross-work-order transaction; each operation is atomic. Authenticate and validate current tenant/membership/device/resource permissions on every attempt, including duplicate replay. Authorization must run before a stored result is returned.
+Each pull page advances its cursor in the same SQLite transaction as its order upserts. Acknowledged rows stay until the cached server version incorporates them, including when the server version arrived before a replay acknowledgment. The local process serializes storage transactions. A key and cache are bound to API origin, tenant, user, role and session. Access/refresh tokens stay outside SQLite. [Offline security](security.md#phase-5-offline-storage)
 
-Uniquely constrain the receipt by tenant, actor/device scope, and OperationId. Store a canonical payload/type/entity fingerprint and the safe committed result. A duplicate identical operation returns its original receipt/result without applying a second mutation. Reusing the ID for another payload yields 409. Concurrent duplicates serialize through the database uniqueness/transaction strategy; a loser reads the committed receipt. Receipt, domain mutation, audit/status history, and change-feed append commit together. A rollback cannot leave a success receipt; a response lost after commit can be retried safely.
+## Push and pull
 
-The server enforces state machine, checklist, assignment, role, and version rules even when the client changed data offline. Use a version predicate and increment once per accepted aggregate mutation. A stale version produces a conflict with authorized current state/version and no mutation. Additive notes may eventually use a separately documented append-only merge rule; default behavior remains explicit version checking until such a rule is tested. An edited retry after user resolution uses a new OperationId and new expected version; network retries preserve the old ID.
+`POST /api/v1/sync/push` takes `{ "protocol": 1, "operations": [...] }`, with 1–20 operations and the API's existing 16 KiB body limit. The client normally sends one at a time. It returns HTTP 200 with ordered per-operation results `applied`, `conflict`, `rejected` or `blocked`. `version` is the committed or currently authorized version when available. `duplicate` distinguishes a replay of an already committed operation. A stale expected version maps the normal HTTP 409 domain condition to `work_order_version_conflict` in the batch result. A reused UUID with a different canonical payload gives `sync_operation_reused`. A failed operation blocks later commands for its work order within the batch. The next independent work order can proceed. Authenticated Technician membership and current assignment are required before receipt disclosure.
 
-## Pull cursor and authorization changes
+PostgreSQL commits each accepted operation's receipt, aggregate/version, audit, history and feed change in the same transaction. Receipts are unique by tenant, user and operation UUID, allowing safe replay across device restarts and access-token refreshes. They store a SHA-256 command fingerprint, work-order ID, resulting version, client capture time and server commit-side time. A response lost after commit can be retried safely. The same request after access loss cannot reveal the receipt or version.
 
-`GET /api/v1/sync/pull?cursor=...` returns bounded committed changes and tombstones for the current user's authorized dataset. The cursor is opaque, integrity-protected, and bound to tenant, user/device scope, authorization generation, and schema/protocol version. A cursor from another scope is rejected. Cursor expiry or incompatible schema requires an explicit full resync rather than guessing from a client timestamp.
+`GET /api/v1/sync/pull?protocol=1&cursor=…` returns at most 20 orders plus `cursor`, `hasMore` and `serverTime`. Start without a cursor. Pull uses a repeatable-read snapshot and validates the opaque cursor against the current tenant/user/session and active assignment identities. PostgreSQL serializes watermark updates by tenant in the same transaction as order updates. A second writer cannot publish a higher committed position past an uncommitted lower position. The feed retains the latest position for each work order. The existing API has no hard-delete work-order command.
 
-The feed sequence must represent a safe committed order. PostgreSQL sequence allocation alone is insufficient: a long transaction could commit after the cursor already passed its lower sequence. Phase 5 must implement and test a serialized transactional feed watermark (or another demonstrably safe committed ordering); the pull cursor advances only past fully visible committed changes. Reads and tombstones use the same ordering contract.
+An expired or authorization-stale cursor returns HTTP 409 `sync_resnapshot_required`. The client hides the prior projection during an authorized resnapshot, removes cached orders and drops queued edits for orders absent from the finished download. Changes to unrelated assignments do not discard still-authorized drafts. A 401 or sync-scope 403 clears the protected local session and cache. This uses authorization invalidation for removal instead of exposing order identifiers outside the technician's scope.
 
-Assignment/membership/visibility changes can remove previously downloaded records. Use authorization-generation invalidation with a purge-and-authorized-resnapshot response, or deliver scoped removal tombstones. Do not rely on filtering the current pull query, since omitted records would otherwise remain readable locally. Reject pending writes after access loss, purge unauthorized cache, and show the reason without exposing the new owner's private data. Offline revocation remains delayed until the device reconnects or its permitted offline access expires.
+## Sync and conflict recovery
 
-Apply each pulled page and its next cursor in a single SQLite transaction. On crash or interrupted page application, retry from the prior committed cursor. Upsert by entity ID/version and make tombstone application repeatable. Local pending edits remain an explicit overlay; server pull must not overwrite them silently.
+Network changes, foregrounding, a foreground timer and **Synchronize now** initiate a bounded drain. The app checks API reachability before using a rotating refresh proof when offline or near token expiry. Bounded exponential backoff with jitter handles interruptions and retryable failures. Server rate-limit wait applies to the whole outbox and survives restart. The sync center shows last download, retry state, rejection and conflict detail. A rejected or conflicted change holds the same order's dependent tail. A technician can review server state and explicitly apply a compatible intent to the current version with a new UUID, or discard the selected edit and its dependent tail. No automatic merge changes the user's intent.
 
-## Retry and user recovery
+## Windows and retention
 
-Network errors, timeout, 429, and transient 5xx responses use capped exponential backoff with jitter and respect Retry-After. Network recovery and app foregrounding trigger a bounded drain; background execution is best effort under mobile OS limits. Authentication expiration triggers one coordinated refresh; revoked sessions stop sync and require login. Permanent validation/authorization rejection and version conflicts do not retry forever.
+- New local work requires an authorized download from the last **24 hours** and an unexpired protected refresh proof. Clock skew beyond five minutes prevents a lease renewal. Revocation cannot reach a disconnected device before it reconnects or loses this local access window.
+- The server accepts previously unseen commands created up to **7 days** earlier or **5 minutes** ahead. An unusable **7-day** cursor forces a full authorized download. An existing identical receipt remains safe to return to an authorized caller.
+- Receipts are retained without automatic pruning. Feed storage is one latest row per work order plus one watermark per tenant. Any future deletion, pruning or retention migration must preserve replay and removal behavior. Migration downgrade is blocked when receipts exist.
 
-The sync center shows last successful synchronization, pending count, in-flight/retry state, individual rejected/conflicted operations, and retry/refresh or discard actions with clear consequences. Offline status is based on connectivity plus actual request behavior. Avoid success indicators until server acknowledgment. Manual resolution preserves the failed intent for review until the user explicitly resolves or discards it.
-
-Before enabling cleanup, choose a documented maximum supported offline window, cursor/tombstone retention, and deduplication retention. Retain receipts at least through the supported replay window. Expired cursors require reseeding; clients must not replay operations older than the server's accepted idempotency window without an explicit reconciliation response. Retention is an implementation gate for Phase 5, not a background cleanup job to add speculatively in Phase 0.
-
-## Required tests and acceptance
-
-- Same operation sent twice, concurrently, and after response loss; exactly one business mutation and audit event.
-- Same ID with different payload, stale versions, invalid transitions, missing required checklist item, and unauthorized target.
-- Crash between local edit/outbox write and during pull page/cursor update; transactional recovery preserves consistency.
-- Interrupted network, bounded retries, Retry-After, refresh failure, app restart, and offline-to-online drain.
-- Multiple queued operations for one work order, conflict in the predecessor, and independent aggregate progress.
-- Delayed database commit around a pull cursor; no missed lower-sequence committed changes.
-- Assignment removal, internal-note visibility change, membership deactivation, tenant switch, logout cleanup, cursor expiry, and incompatible protocol.
-- Tombstone repeated delivery, deleted/archived resources, retry after authorization loss, and receipt retention boundary.
-
-Use real PostgreSQL integration tests for atomicity/deduplication/feed behavior and SQLite/native tests for local persistence/recovery. A mocked network unit test alone does not demonstrate the complete offline system.
+The exact tests and native acceptance limits are recorded in [the Phase 5 report](phase-5-results.md).

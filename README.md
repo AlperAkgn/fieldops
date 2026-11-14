@@ -2,7 +2,7 @@
 
 Manage field operations, empower technicians, and keep every service job under control.
 
-FieldOps is a multi-tenant field service management platform in development. The admin workspace and Phase 4 online technician app connect customer, equipment, scheduling and work-order workflows to the verified identity and operational APIs. Mobile native-device acceptance remains an explicit environment gate. [Mobile setup and verification](docs/mobile.md)
+FieldOps is a multi-tenant field service management platform in development. The admin workspace and technician app connect customer, equipment, scheduling and work-order workflows to the identity and operational APIs. Phase 5 adds a local technician workspace with offline synchronization. Native-device acceptance is deferred. [Mobile setup and verification](docs/mobile.md)
 
 ## Problem and product scope
 
@@ -22,7 +22,7 @@ The first release targets general field service operations rather than a single 
 - Separate process liveness and database/migration readiness endpoints, structured JSON logs, safe ProblemDetails responses, and development OpenAPI.
 - A responsive React admin workspace with secure cookie authentication, organization switching, role-aware routes, customer/location/asset CRUD, work-order actions, assignments, comments, checklists and structured audit history.
 - Actual PostgreSQL-backed overview/report aggregates, daily/weekly scheduling, conflict/override forms, owner-controlled team administration and session settings.
-- An Expo technician app with protected sessions, workspace selection, assigned tasks, customer/site/asset details, maps, versioned status/checklist/service-note actions and profile/logout. Offline work remains Phase 5.
+- An Expo technician app with protected sessions, workspace selection, assigned tasks, customer/site/asset details, maps, versioned status/checklist/service-note actions and profile/logout. Downloaded work orders, an encrypted outbox and the Sync tab support work through network interruptions.
 - Local PostgreSQL, API, migration job, Mailpit email capture, and MinIO using Docker Compose.
 - Locked dependencies, backend architecture/health/database tests, client transport tests, and a GitHub Actions workflow.
 
@@ -171,11 +171,11 @@ Development OpenAPI describes health, identity and operational routes. The nativ
 
 ## Planned offline synchronization
 
-Phase 5 will use Expo SQLite, a durable local outbox, server-side operation idempotency, optimistic versions, authorized incremental pull, explicit conflicts, and cache cleanup on logout or authorization loss. No offline persistence or synchronization is implemented in Phase 0. See [offline sync design](docs/offline-sync.md).
+Phase 5 uses Expo SQLite with SQLCipher, a durable local outbox, server-side synchronization receipts, optimistic versions, scoped incremental pull and explicit conflict resolution. The offline feature requires a new native build. [Offline synchronization](docs/offline-sync.md)
 
 ## Screenshots and demo
 
-The admin web runs actual operational workflows. Playwright produces desktop, dark-theme and mobile-width screenshots in ignored artifact directories; its accounts are disposable local test fixtures. The mobile app has online technician screens, component tests and real API/PostgreSQL tests. Native Android/iOS execution is a separate pending environment gate; no device screenshots or passing native run are claimed. No public demo or deployed credentials are available; a reusable product demo seed remains Phase 8.
+The admin web runs actual operational workflows. Playwright produces desktop, dark-theme and mobile-width screenshots in ignored artifact directories using disposable local fixtures. Mobile verification includes component, SQLite and real API/PostgreSQL tests. Native Android/iOS execution is `DEFERRED / NOT VERIFIED`. A reusable product demo seed remains Phase 8.
 
 ## Roadmap
 

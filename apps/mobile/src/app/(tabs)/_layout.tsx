@@ -1,7 +1,9 @@
 import { Tabs } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '../../components/ui';
+import { useSession } from '../../auth/runtime';
 export default function TabLayout() {
+  const { state } = useSession();
   return (
     <Tabs
       screenOptions={{
@@ -31,6 +33,21 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons
               name="clipboard-outline"
+              color={typeof color === 'string' ? color : colors.primary}
+              size={size}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="sync"
+        options={{
+          title: 'Sync',
+          href:
+            (state.access?.role ?? state.offline?.role) === 'Technician' ? '/(tabs)/sync' : null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons
+              name="sync-outline"
               color={typeof color === 'string' ? color : colors.primary}
               size={size}
             />

@@ -39,11 +39,14 @@ public static class DependencyInjection
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<OperationalWriteContext>();
         services.AddScoped<ICatalogService, CatalogService>();
-        services.AddScoped<IWorkOrderService, WorkOrderService>();
+        services.AddScoped<WorkOrderService>();
+        services.AddScoped<IWorkOrderService>(provider => provider.GetRequiredService<WorkOrderService>());
         services.AddScoped<IAuditLogReader, AuditLogReader>();
         services.AddScoped<FieldOps.Application.Reporting.IReportingReader, ReportingReader>();
         services.AddScoped<IChecklistTemplateService, ChecklistTemplateService>();
-        services.AddScoped<IWorkOrderDetailService, WorkOrderDetailService>();
+        services.AddScoped<WorkOrderDetailService>();
+        services.AddScoped<IWorkOrderDetailService>(provider => provider.GetRequiredService<WorkOrderDetailService>());
+        services.AddScoped<ISyncService, SyncService>();
         if (configuration is not null) services.AddIdentityInfrastructure(configuration);
 
         return services;

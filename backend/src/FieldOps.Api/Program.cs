@@ -128,6 +128,7 @@ app.MapReportingEndpoints();
 app.MapWorkOrderDetailEndpoints();
 app.MapCatalogEndpoints();
 app.MapWorkOrderEndpoints();
+app.MapSyncEndpoints();
 
 app.MapGet("/health/live", async (HttpContext context, HealthCheckService healthChecks) =>
 {

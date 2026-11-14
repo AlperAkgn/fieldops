@@ -78,6 +78,7 @@ public sealed partial class FieldOpsDbContext(DbContextOptions<FieldOpsDbContext
         ConfigureCatalog(modelBuilder);
         ConfigureWorkOrders(modelBuilder);
         ConfigureWorkOrderDetails(modelBuilder);
+        ConfigureSync(modelBuilder);
     }
 
     partial void ConfigureOrganizations(ModelBuilder modelBuilder);

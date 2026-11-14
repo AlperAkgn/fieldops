@@ -18,7 +18,7 @@ internal sealed class WorkOrderService(FieldOpsDbContext database, OperationalWr
         order.Id, order.WorkOrderNumber, order.CustomerId, order.ServiceLocationId, order.AssetId, order.Title,
         order.Description, order.Priority, order.Status, order.PlannedStartAt, order.PlannedEndAt, order.ActualStartAt,
         order.ActualEndAt, order.CreatedByUserId, order.CreatedAt, order.UpdatedAt, order.Version);
-    private static readonly Func<WorkOrder, WorkOrderDto> ToDto = Projection.Compile();
+    internal static readonly Func<WorkOrder, WorkOrderDto> ToDto = Projection.Compile();
 
     public async Task<PageResult<WorkOrderDto>> ListAsync(WorkOrderListQuery request, CancellationToken cancellationToken)
     {
@@ -232,11 +232,19 @@ internal sealed class WorkOrderService(FieldOpsDbContext database, OperationalWr
     public async Task<WorkOrderDto> ExecuteAsync(Guid id, WorkOrderAction action, WorkOrderActionRequest request,
         CancellationToken cancellationToken)
     {
+        await using var transaction = await writes.BeginAsync(cancellationToken);
+        var result = await ExecuteInTransactionAsync(id, action, request, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    internal async Task<WorkOrderDto> ExecuteInTransactionAsync(Guid id, WorkOrderAction action,
+        WorkOrderActionRequest request, CancellationToken cancellationToken)
+    {
         var actor = writes.Actor;
         if (action == WorkOrderAction.Cancel) WorkOrderAccess.RequireManager(actor);
         else WorkOrderAccess.RequireExecution(actor);
         var reason = NormalizeReason(request.Reason);
-        await using var transaction = await writes.BeginAsync(cancellationToken);
         var order = await WorkOrderAccess.LoadAsync(database, actor, id, cancellationToken);
         var previous = order.Status;
         var now = writes.Now;
@@ -246,7 +254,6 @@ internal sealed class WorkOrderService(FieldOpsDbContext database, OperationalWr
         RecordStatus(order, previous, actor.UserId, now, reason);
         writes.Audit(ResourceType, id, action.ToString().ToLowerInvariant(), reason);
         await database.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
         return ToDto(order);
     }
 

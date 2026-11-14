@@ -7,9 +7,12 @@ import {
 } from 'react';
 import { AppState, Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import * as Network from 'expo-network';
 import { QueryClient } from '@tanstack/react-query';
 import { NativeTransport, nativeOrigin } from '../api/transport';
+import { fetchHealth } from '../api/health';
 import { MobileSession } from './session';
+import { removeOfflineVault } from '../offline/vault';
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -61,20 +64,45 @@ export const mobileSession = new MobileSession(
     void queryClient.cancelQueries();
     queryClient.clear();
   },
+  Date.now,
+  () => (Platform.OS === 'web' ? Promise.resolve() : removeOfflineVault()),
 );
 export const SessionContext = createContext(mobileSession);
+async function serviceReachable(signal?: AbortSignal) {
+  try {
+    if (configurationError) return false;
+    const network = await Network.getNetworkStateAsync();
+    if (network.isConnected === false || network.isInternetReachable === false) return false;
+    return (await fetchHealth(apiConfig.origin, 'ready', signal)).status === 'Healthy';
+  } catch {
+    return false;
+  }
+}
 export function SessionProvider({ children }: PropsWithChildren) {
   useEffect(() => {
-    void mobileSession.bootstrap().catch(() => undefined);
+    const controller = new AbortController();
+    void serviceReachable(controller.signal)
+      .then((reachable) => {
+        if (controller.signal.aborted) return;
+        return reachable ? mobileSession.bootstrap() : mobileSession.restoreOffline();
+      })
+      .catch(() => undefined);
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && mobileSession.snapshot().status === 'authenticated') {
-        void mobileSession
-          .profile()
-          .then(() => queryClient.invalidateQueries())
-          .catch(() => undefined);
-      }
+      const access = mobileSession.snapshot().access;
+      if (state !== 'active' || !access || access.role === 'Technician') return;
+      void serviceReachable(controller.signal)
+        .then(async (reachable) => {
+          if (!reachable || controller.signal.aborted || mobileSession.snapshot().access !== access)
+            return;
+          await mobileSession.profile(controller.signal);
+          await queryClient.invalidateQueries();
+        })
+        .catch(() => undefined);
     });
-    return () => subscription.remove();
+    return () => {
+      controller.abort();
+      subscription.remove();
+    };
   }, []);
   return <SessionContext.Provider value={mobileSession}>{children}</SessionContext.Provider>;
 }

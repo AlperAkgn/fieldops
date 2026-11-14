@@ -31,14 +31,76 @@ function setup(
     return result instanceof Response ? result : Response.json(result);
   }) as unknown as typeof fetch;
   const clear = vi.fn();
-  const session = new MobileSession(
-    new NativeTransport('https://api.fieldops.test', fetcher),
-    storage,
-    clear,
-  );
-  return { session, storage, clear, fetcher, value: () => value };
+  const eraseVault = vi.fn(async () => {});
+  const start = () =>
+    new MobileSession(
+      new NativeTransport('https://api.fieldops.test', fetcher),
+      storage,
+      clear,
+      Date.now,
+      eraseVault,
+    );
+  return { session: start(), start, storage, clear, fetcher, eraseVault, value: () => value };
 }
 describe('protected native sessions', () => {
+  it('restores only the protected offline scope, then clears it before an offline restart after sign out', async () => {
+    const ctx = setup();
+    await ctx.session.login('a', 'b');
+    const restarted = ctx.start();
+    await restarted.restoreOffline();
+    expect(restarted.snapshot()).toMatchObject({
+      status: 'offline',
+      access: null,
+      offline: { tenantId: 'tenant', sessionId: 'session' },
+    });
+    await expect(restarted.request('/protected')).rejects.toMatchObject({ status: 401 });
+    expect(ctx.fetcher).toHaveBeenCalledTimes(1);
+    ctx.eraseVault.mockClear();
+    expect(await restarted.logout()).toBe(false);
+    expect(ctx.eraseVault).toHaveBeenCalledOnce();
+    expect(ctx.value()).toBeNull();
+    const afterLogout = ctx.start();
+    await afterLogout.restoreOffline();
+    expect(afterLogout.snapshot()).toMatchObject({
+      status: 'signedOut',
+      access: null,
+      offline: null,
+    });
+  });
+
+  it('does not preserve the cached key or proof after server revocation on reconnect', async () => {
+    const ctx = setup((path) =>
+      path === '/auth/refresh' ? new Response('{}', { status: 401 }) : pair(),
+    );
+    await ctx.session.login('a', 'b');
+    const restarted = ctx.start();
+    await restarted.restoreOffline();
+    ctx.eraseVault.mockClear();
+    await expect(restarted.refresh()).rejects.toMatchObject({ status: 401 });
+    expect(restarted.snapshot()).toMatchObject({
+      status: 'signedOut',
+      access: null,
+      offline: null,
+    });
+    expect(ctx.eraseVault).toHaveBeenCalledOnce();
+    expect(ctx.value()).toBeNull();
+  });
+
+  it('erases the previous workspace before storing the new scope and ignores revocation for the old scope', async () => {
+    const ctx = setup((path) =>
+      path.endsWith('/select') ? pair({ tenantId: 'other', sessionId: 'new' }) : pair(),
+    );
+    await ctx.session.login('a', 'b');
+    const previous = ctx.session.snapshot().access!;
+    ctx.eraseVault.mockClear();
+    await ctx.session.selectOrganization('other');
+    expect(ctx.eraseVault).toHaveBeenCalledOnce();
+    await ctx.session.revokeOfflineScope(previous);
+    expect(ctx.eraseVault).toHaveBeenCalledOnce();
+    const restarted = ctx.start();
+    await restarted.restoreOffline();
+    expect(restarted.snapshot().offline).toMatchObject({ tenantId: 'other', sessionId: 'new' });
+  });
   it('clears protected proof before a delayed server logout can be interrupted', async () => {
     let entered!: () => void;
     let release!: () => void;

@@ -4,6 +4,7 @@ import { useSession } from '../auth/runtime';
 import { ApiError } from '../api/transport';
 import { TechnicianApi } from './orders';
 import type { Checklist, OrderDetail, Organization } from '../api/contracts';
+import { useOffline } from '../offline/runtime';
 
 export function useApi() {
   const { session, state } = useSession();
@@ -19,9 +20,10 @@ export function useApi() {
 }
 export function useWorkspace() {
   const { session, state, scope } = useApi();
+  const { offline } = useOffline();
   return useQuery({
     queryKey: [...scope, 'organizations'],
-    enabled: state.status === 'authenticated' && !state.busy,
+    enabled: state.status === 'authenticated' && !state.busy && !offline,
     queryFn: async ({ signal }) => {
       const rows = await session.request<Organization[]>('/organizations', {
         signal,

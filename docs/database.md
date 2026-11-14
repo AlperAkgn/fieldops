@@ -87,8 +87,8 @@ Use UUID primary keys. Tenant-owned records include `TenantId`; `Organizations.I
 | WorkOrderChecklistItem | WorkOrderId, stable item ID, copied label/order/required rule, completion state/actor/time, source template/version for provenance |
 | WorkOrderAttachment | WorkOrderId, private object key, safe original name, validated media type/size, checksum, uploader/time, category |
 | AuditLog / status history | Tenant, actor, entity, action/transition, reason, UTC timestamp, safe before/after metadata |
-| SyncOperation | Tenant, actor/device scope, OperationId, entity, operation type, payload fingerprint, result/version, receipt time |
-| SyncChangeRecord | Tenant, monotonically ordered sequence, entity/type, version, audience/scope metadata, tombstone marker |
+| SyncReceipt | Tenant, actor, operation UUID, work-order ID, command fingerprint, committed version, client capture time and server receipt time |
+| SyncWorkOrderChange / SyncWatermark | Latest position per tenant/work order and transactional high watermark per tenant |
 
 `CreatedAt` and `UpdatedAt` are server-controlled. Preserve deleted/deactivated actors through stable references and safe display snapshots where retention requires history. Do not cascade-delete work orders, attachments metadata, audit entries, or service history when a customer or membership is archived.
 
@@ -109,5 +109,7 @@ Add tenant-leading indexes for actual query patterns: work order status/planned 
 Customer DELETE means archive, retaining service history. Define archive visibility explicitly; historical work order references remain readable to authorized users. Sync removal/revocation emits an authorized tombstone or invalidates the device scope; never silently omit a formerly cached record. Cursor/tombstone and idempotency retention policies are finalized and tested in Phase 5 before pruning is enabled.
 
 ## Migration and test policy
+
+Phase 5 migration `20261113203829_OfflineSynchronization` creates `SyncReceipts`, `SyncWorkOrderChanges` and `SyncWatermarks`. Receipt keys include tenant/user/operation and composite tenant foreign keys. A transactional trigger maintains the tenant watermark and latest work-order position. The migration locks work-order writes during backfill and preserves prior versions and audit rows. Downgrade refuses to remove committed receipts. [Cursor and retention details](offline-sync.md#push-and-pull)
 
 Run migrations explicitly using the documented local tool; do not use `EnsureCreated` as a replacement. Verify migrations against real PostgreSQL, including empty-database creation, repeat application, pending model changes, constraints, rollback failure behavior, and representative upgrades when feature schema exists. Tests use isolated databases or schemas and never a production connection. Phase 0 cannot validate tenant constraints because tenant tables do not exist yet. See [deployment.md](deployment.md) for executable migration commands.

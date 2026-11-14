@@ -4,6 +4,7 @@ import { Text, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useApi, useWorkspace } from '../../features/queries';
 import { message, statusLabel } from '../../features/orders';
+import { useOffline } from '../../offline/runtime';
 import {
   Button,
   Card,
@@ -17,12 +18,14 @@ import {
 export default function Profile() {
   const { session, state, scope } = useApi();
   const workspace = useWorkspace();
+  const offline = useOffline();
   const [error, setError] = useState('');
   const [signOut, setSignOut] = useState(false);
+  const canSwitch = !offline.offline && !offline.busy && !offline.snapshot?.operations.length;
   const profile = useQuery({
     queryKey: [...scope, 'profile'],
     queryFn: ({ signal }) => session.profile(signal),
-    enabled: !state.busy,
+    enabled: state.status === 'authenticated' && !state.busy && !offline.offline,
   });
   return (
     <Screen>
@@ -38,7 +41,7 @@ export default function Profile() {
         />
       )}
       {error !== '' && <ErrorBox text={error} />}
-      {profile.data && (
+      {!offline.offline && profile.data && (
         <Card>
           <Icon name="person-circle-outline" />
           <Text style={styles.title}>{profile.data.displayName}</Text>
@@ -70,7 +73,7 @@ export default function Profile() {
               </Text>
               <Button
                 title={`Switch to ${row.name}`}
-                disabled={state.busy}
+                disabled={state.busy || !canSwitch}
                 secondary
                 onPress={() => {
                   setError('');
@@ -82,7 +85,13 @@ export default function Profile() {
       </Card>
       <Card>
         <Text style={styles.label}>{copy.onlineService}</Text>
-        <Text style={styles.subtitle}>{copy.onlineNotice}</Text>
+        <Text style={styles.subtitle}>
+          {offline.offline
+            ? 'Offline. Workspace switching requires a connection.'
+            : offline.snapshot?.operations.length
+              ? 'Synchronize or review saved edits before switching workspaces.'
+              : 'Downloaded orders and saved edits are available in Sync.'}
+        </Text>
         <Button
           title={copy.signOut}
           danger
@@ -94,7 +103,7 @@ export default function Profile() {
         visible={signOut}
         busy={state.busy}
         title={copy.confirmSignOut}
-        body={copy.signOutNotice}
+        body="Signing out clears downloaded work and any saved edits on this device."
         onCancel={() => setSignOut(false)}
         onConfirm={() => {
           void session.logout().catch((err) => setError(message(err)));

@@ -10,5 +10,9 @@ export default function Entry() {
         <Loading label={copy.restoringProtectedSession} />
       </Screen>
     );
-  return <Redirect href={state.status === 'authenticated' ? '/(tabs)' : '/sign-in'} />;
+  return (
+    <Redirect
+      href={state.status === 'authenticated' || state.status === 'offline' ? '/(tabs)' : '/sign-in'}
+    />
+  );
 }

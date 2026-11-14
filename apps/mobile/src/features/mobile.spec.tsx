@@ -1,6 +1,11 @@
 import { describe, expect, it, jest, beforeEach, afterEach } from '@jest/globals';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
+import {
+  defaultScheduler,
+  QueryClient,
+  QueryClientProvider,
+  notifyManager,
+} from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SessionContext } from '../auth/runtime';
 import { MobileSession } from '../auth/session';
@@ -11,8 +16,23 @@ import { OrdersScreen } from './OrdersScreen';
 import { withOrderLock } from './queries';
 import Profile from '../app/(tabs)/profile';
 import { Linking } from 'react-native';
+import * as Network from 'expo-network';
+import { OfflineProvider } from '../offline/runtime';
+import { openOfflineVault } from '../offline/vault';
+import type { OfflineSnapshot, OfflineStore } from '../offline/store';
+import WorkOrderRoute from '../app/work-orders/[id]';
+jest.mock('expo-crypto', () => ({ randomUUID: () => '9f08cfe4-4811-41ca-983e-b6333994bf04' }));
+jest.mock('expo-network', () => ({
+  getNetworkStateAsync: jest.fn(),
+  addNetworkStateListener: jest.fn(),
+}));
+jest.mock('../offline/vault', () => ({
+  openOfflineVault: jest.fn(),
+  removeOfflineVault: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+}));
 jest.mock('expo-router', () => ({
   Redirect: () => null,
+  useLocalSearchParams: () => ({ id: 'order' }),
   router: {
     push: jest.fn(),
     navigate: jest.fn(),
@@ -45,12 +65,15 @@ const initialOrder = {
   description: 'Pressure check',
 };
 const clients: QueryClient[] = [];
-notifyManager.setNotifyFunction((callback) => {
+function notifyWithinAct(callback: () => void) {
   act(callback);
-});
+}
+notifyManager.setNotifyFunction(notifyWithinAct);
 afterEach(() => {
   clients.forEach((client) => client.clear());
   clients.length = 0;
+  notifyManager.setScheduler(defaultScheduler);
+  notifyManager.setNotifyFunction(notifyWithinAct);
 });
 let order = { ...initialOrder };
 let completed = false;
@@ -86,6 +109,13 @@ function fixture() {
         emailConfirmed: true,
       });
     if (path === '/auth/logout') return response(null, 204);
+    if (path.startsWith('/sync/pull'))
+      return response({
+        cursor: 'cursor',
+        hasMore: false,
+        serverTime: new Date().toISOString(),
+        orders: [],
+      });
     if (path === '/organizations')
       return response([
         {
@@ -213,6 +243,90 @@ beforeEach(() => {
   calls = [];
 });
 describe('native technician components', () => {
+  it('switches to the downloaded order on network loss and keeps a service note draft', async () => {
+    const ctx = fixture();
+    await ctx.session.login('a', 'b');
+    const initialNetwork = Promise.withResolvers<Network.NetworkState>();
+    jest.mocked(Network.getNetworkStateAsync).mockReturnValueOnce(initialNetwork.promise);
+    jest.mocked(Network.addNetworkStateListener).mockReturnValueOnce({ remove: jest.fn() });
+    const enqueue = jest.fn<OfflineStore['enqueue']>().mockResolvedValue(undefined);
+    const pageApplied = Promise.withResolvers<void>();
+    const work = { ...initialOrder, createdAt: '', updatedAt: '' };
+    const snapshot: OfflineSnapshot = {
+      cursor: 'cursor',
+      lastSync: Date.now(),
+      rebuilding: false,
+      removed: 0,
+      retryAt: 0,
+      operations: [],
+      orders: [
+        {
+          order: work as OfflineSnapshot['orders'][number]['order'],
+          notes: [],
+          checklist: {
+            workOrderId: work.id,
+            workOrderVersion: work.version,
+            totalItems: 0,
+            completedItems: 0,
+            progressPercent: 0,
+            requiredItemsComplete: true,
+            items: [],
+          },
+        },
+      ],
+    };
+    const vault = {
+      snapshot: async () => snapshot,
+      applyPage: async () => pageApplied.resolve(),
+      enqueue,
+    };
+    jest
+      .mocked(openOfflineVault)
+      .mockResolvedValueOnce(vault as unknown as Awaited<ReturnType<typeof openOfflineVault>>);
+    // This test drives the mocked I/O inside act, including the Query notifications.
+    notifyManager.setScheduler(queueMicrotask);
+    notifyManager.setNotifyFunction((callback) => callback());
+    ctx.mount(
+      <OfflineProvider>
+        <WorkOrderRoute />
+      </OfflineProvider>,
+    );
+    await act(async () => {
+      initialNetwork.resolve({ isConnected: true });
+      await pageApplied.promise;
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('header', { name: work.title })).toBeOnTheScreen();
+      expect(screen.getByRole('button', { name: 'Start work' })).toBeEnabled();
+    });
+    await act(async () =>
+      fireEvent.press(screen.getByRole('tab', { name: 'Notes', selected: false })),
+    );
+    expect(screen.getByRole('tab', { name: 'Notes', selected: true })).toBeOnTheScreen();
+    fireEvent.changeText(screen.getByLabelText('Service note'), 'Retain this draft');
+    expect(screen.getByDisplayValue('Retain this draft')).toBeOnTheScreen();
+    const [networkChanged] = jest.mocked(Network.addNetworkStateListener).mock.lastCall ?? [];
+    if (!networkChanged)
+      throw new Error('The offline workspace did not subscribe to connectivity.');
+    await act(async () => networkChanged({ isConnected: false }));
+    expect(await screen.findByText('Offline')).toBeOnTheScreen();
+    expect(screen.getByText(work.title)).toBeOnTheScreen();
+    expect(screen.getByText(`Version ${work.version}`)).toBeOnTheScreen();
+    expect(screen.getByDisplayValue('Retain this draft')).toBeOnTheScreen();
+    const save = screen.getByRole('button', { name: 'Save note' });
+    expect(save).toBeEnabled();
+    await act(async () => fireEvent.press(save));
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledWith(expect.any(String), work.id, work.version, {
+      kind: 'note',
+      body: 'Retain this draft',
+    });
+    expect(
+      calls.some(
+        ({ path, body }) => (path.includes('/comments') && 'body' in body) || path === '/sync/push',
+      ),
+    ).toBe(false);
+  });
   it('applies an accessible status filter through the API', async () => {
     const ctx = fixture();
     await ctx.session.login('a', 'b');

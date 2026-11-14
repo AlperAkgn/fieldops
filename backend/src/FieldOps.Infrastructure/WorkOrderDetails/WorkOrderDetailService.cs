@@ -67,10 +67,18 @@ internal sealed class WorkOrderDetailService(FieldOpsDbContext database, Operati
     public async Task<WorkOrderChecklistDto> UpdateChecklistItemAsync(Guid workOrderId, Guid itemId,
         UpdateWorkOrderChecklistItemRequest request, CancellationToken cancellationToken)
     {
+        await using var transaction = await writes.BeginAsync(cancellationToken);
+        var result = await UpdateInTransactionAsync(workOrderId, itemId, request, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    internal async Task<WorkOrderChecklistDto> UpdateInTransactionAsync(Guid workOrderId, Guid itemId,
+        UpdateWorkOrderChecklistItemRequest request, CancellationToken cancellationToken)
+    {
         if (request.IsCompleted is null)
             throw DetailRules.Invalid("checklist_completion_required", "Provide the item completion state.");
 
-        await using var transaction = await writes.BeginAsync(cancellationToken);
         var actor = writes.Actor;
         WorkOrderAccess.RequireExecution(actor);
         var order = await WorkOrderAccess.LoadAsync(database, actor, workOrderId, cancellationToken);
@@ -82,9 +90,7 @@ internal sealed class WorkOrderDetailService(FieldOpsDbContext database, Operati
         item.SetCompletion(request.IsCompleted.Value, actor.UserId, now);
         writes.Audit("work_order", order.Id, item.IsCompleted ? "checklist_item_completed" : "checklist_item_reopened");
         await database.SaveChangesAsync(cancellationToken);
-        var result = await GetChecklistAsync(workOrderId, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        return result;
+        return await GetChecklistAsync(workOrderId, cancellationToken);
     }
 
     public async Task<PageResult<WorkOrderCommentDto>> ListCommentsAsync(Guid workOrderId, PageRequest page,
@@ -116,6 +122,14 @@ internal sealed class WorkOrderDetailService(FieldOpsDbContext database, Operati
         CancellationToken cancellationToken)
     {
         await using var transaction = await writes.BeginAsync(cancellationToken);
+        var result = await AddCommentInTransactionAsync(workOrderId, request, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    internal async Task<AddedWorkOrderCommentDto> AddCommentInTransactionAsync(Guid workOrderId,
+        AddWorkOrderCommentRequest request, CancellationToken cancellationToken)
+    {
         var actor = writes.Actor;
         WorkOrderAccess.RequireExecution(actor);
         var order = await WorkOrderAccess.LoadAsync(database, actor, workOrderId, cancellationToken);
@@ -131,7 +145,6 @@ internal sealed class WorkOrderDetailService(FieldOpsDbContext database, Operati
         database.WorkOrderComments.Add(comment);
         writes.Audit("work_order", order.Id, "comment_added");
         await database.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
         return new AddedWorkOrderCommentDto(new WorkOrderCommentDto(comment.Id, comment.AuthorUserId, displayName, comment.Body,
             comment.Visibility, comment.CreatedAt), order.Version);
     }

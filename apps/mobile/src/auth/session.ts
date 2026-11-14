@@ -6,17 +6,31 @@ export interface CredentialStore {
   remove(): Promise<void>;
 }
 export type SessionState = {
-  status: 'loading' | 'signedOut' | 'authenticated' | 'locked';
+  status: 'loading' | 'signedOut' | 'authenticated' | 'offline' | 'locked';
   access: Omit<TokenPair, 'refreshToken'> | null;
+  offline?: OfflineIdentity | null;
   message: string | null;
   busy: boolean;
 };
+export type OfflineIdentity = Pick<
+  TokenPair,
+  'tenantId' | 'userId' | 'sessionId' | 'role' | 'refreshExpiresAt'
+>;
+export function sameOfflineScope(left: OfflineIdentity | null | undefined, right: OfflineIdentity) {
+  return (
+    left?.tenantId === right.tenantId &&
+    left.userId === right.userId &&
+    left.sessionId === right.sessionId &&
+    left.role === right.role
+  );
+}
 type Stored = {
   version: 1;
   origin: string;
   state: 'ready';
   refreshToken: string;
   refreshExpiresAt: string;
+  offline?: OfflineIdentity;
 };
 export class MobileSession {
   private state: SessionState = {
@@ -35,6 +49,7 @@ export class MobileSession {
     private storage: CredentialStore,
     private clearScope: () => void,
     private now: () => number = Date.now,
+    private removeOffline: () => Promise<void> = async () => {},
   ) {}
   snapshot = () => this.state;
   subscribe = (listener: () => void) => {
@@ -55,7 +70,7 @@ export class MobileSession {
   private reset(status: SessionState['status'], message: string | null) {
     this.generation++;
     this.clearScope();
-    this.publish({ status, access: null, message });
+    this.publish({ status, access: null, offline: null, message });
   }
   private async erase(message: string | null = null) {
     this.reset('signedOut', message);
@@ -77,6 +92,11 @@ export class MobileSession {
       cleared = true;
     } catch {
       /* A persisted tombstone also prevents bootstrap. */
+    }
+    try {
+      await this.removeOffline();
+    } catch {
+      cleared = false;
     }
     if (!cleared) {
       this.reset(
@@ -104,8 +124,11 @@ export class MobileSession {
       return null;
     return record as Stored;
   }
-  private async accept(value: unknown) {
+  private async accept(value: unknown, previous?: OfflineIdentity) {
     const pair = parseTokenPair(value);
+    const { sessionId, userId, tenantId, role, refreshExpiresAt } = pair;
+    const offline = { sessionId, userId, tenantId, role, refreshExpiresAt };
+    if (previous && !sameOfflineScope(previous, offline)) await this.removeOffline();
     await this.storage.set(
       JSON.stringify({
         version: 1,
@@ -113,6 +136,7 @@ export class MobileSession {
         state: 'ready',
         refreshToken: pair.refreshToken,
         refreshExpiresAt: pair.refreshExpiresAt,
+        offline,
       } satisfies Stored),
     );
     const access = {
@@ -135,7 +159,7 @@ export class MobileSession {
       this.generation++;
       this.clearScope();
     }
-    this.publish({ status: 'authenticated', access, message: null });
+    this.publish({ status: 'authenticated', access, offline: null, message: null });
   }
   private async refreshInside() {
     this.publish({ busy: true });
@@ -158,7 +182,7 @@ export class MobileSession {
         method: 'POST',
         body: { refreshToken: credential.refreshToken },
       });
-      await this.accept(pair);
+      await this.accept(pair, credential.offline);
     } catch (error) {
       await this.erase('Your session could not be restored safely. Please sign in again.');
       throw error;
@@ -169,6 +193,31 @@ export class MobileSession {
   bootstrap() {
     if (!this.booting) this.booting = this.refresh();
     return this.booting;
+  }
+  restoreOffline() {
+    return this.queue(async () => {
+      if (this.state.status !== 'loading') return;
+      const credential = await this.credential().catch(() => null);
+      if (!credential) {
+        await this.erase('Connect to the service to sign in.');
+        return;
+      }
+      const scope = credential?.offline;
+      if (
+        !this.transport.origin.startsWith('https://') ||
+        scope?.role !== 'Technician' ||
+        !scope.sessionId ||
+        !scope.userId ||
+        !scope.tenantId ||
+        scope.refreshExpiresAt !== credential?.refreshExpiresAt ||
+        Date.parse(scope.refreshExpiresAt) <= this.now()
+      ) {
+        // Keep a valid credential available for a later online boot.
+        this.reset('signedOut', 'Connect to the service to sign in.');
+        return;
+      }
+      this.publish({ status: 'offline', access: null, offline: scope, message: null });
+    });
   }
   refresh() {
     if (!this.refreshing)
@@ -203,6 +252,7 @@ export class MobileSession {
       try {
         const credential = await this.credential();
         if (!credential) throw new Error('Session unavailable.');
+        await this.removeOffline();
         await this.storage.set(
           JSON.stringify({
             version: 1,
@@ -265,6 +315,12 @@ export class MobileSession {
   clearLocal() {
     return this.queue(() => this.erase());
   }
+  revokeOfflineScope(scope: OfflineIdentity) {
+    return this.queue(async () => {
+      if (sameOfflineScope(this.state.access ?? this.state.offline, scope))
+        await this.erase('Your workspace access changed. Sign in again.');
+    });
+  }
   async request<T>(path: string, options: Omit<RequestOptions, 'token'> = {}): Promise<T> {
     if (this.refreshing) await this.refreshing;
     if (this.state.busy)
@@ -293,10 +349,18 @@ export class MobileSession {
   }
   async profile(signal?: AbortSignal) {
     const profile = await this.request<Profile>('/auth/me', signal ? { signal } : {});
-    if (this.state.access && profile.role !== this.state.access.role) {
+    const access = this.state.access;
+    if (access && profile.role !== access.role) {
       this.generation++;
       this.clearScope();
-      this.publish({ access: { ...this.state.access, role: profile.role } });
+      this.publish({ access: { ...access, role: profile.role } });
+      await this.queue(async () => {
+        const current = this.state.access;
+        if (!current || !sameOfflineScope(current, { ...access, role: profile.role })) return;
+        const stored = await this.credential();
+        if (stored) await this.storage.set(JSON.stringify({ ...stored, offline: undefined }));
+        await this.removeOffline();
+      });
     }
     return profile;
   }

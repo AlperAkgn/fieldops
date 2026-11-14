@@ -114,11 +114,13 @@ public sealed class WorkOrderDetailSecurityTests : CoreOperationsTestBase
             var previous = Assert.Single(context.Database.GetMigrations(),
                 name => name.EndsWith("_RevokeUnactivatedAccountSessions", StringComparison.Ordinal));
             await Assert.ThrowsAsync<NotSupportedException>(() => context.GetService<IMigrator>().MigrateAsync(previous));
-            Assert.Empty(await context.Database.GetPendingMigrationsAsync());
+            var pending = Assert.Single(await context.Database.GetPendingMigrationsAsync());
+            Assert.EndsWith("_OfflineSynchronization", pending, StringComparison.Ordinal);
             Assert.Equal(1, await context.WorkOrders.IgnoreQueryFilters().CountAsync());
             Assert.Equal(1, await context.Customers.IgnoreQueryFilters().CountAsync());
             Assert.True(await context.AuditLogs.IgnoreQueryFilters().CountAsync() >= 5);
             await context.Database.MigrateAsync();
+            Assert.Empty(await context.Database.GetPendingMigrationsAsync());
         });
     }
 }

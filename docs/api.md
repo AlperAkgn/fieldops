@@ -139,6 +139,8 @@ Registration creates the user, initial organization, and Owner membership in one
 
 Sync operations carry OperationId, entity/type, ExpectedVersion, ClientCreatedAt, and payload. Their atomic receipt/result contract and duplicate handling are specified in [offline-sync.md](offline-sync.md). State-changing endpoints use explicit action commands; arbitrary PATCH cannot bypass the domain state machine or alter assignment/tenant/version fields.
 
+Phase 5 adds bearer-authenticated `GET /api/v1/sync/pull?protocol=1&cursor=…` and `POST /api/v1/sync/push` for the active Technician workspace. Push accepts 1–20 operations and returns a result for each command, including any version conflict and the current authorized version. Pull returns a maximum of 20 assigned-order snapshots and a scoped cursor. `409 sync_resnapshot_required` invalidates the previous download. [Protocol, responses and retention](offline-sync.md)
+
 SignalR messages are post-commit invalidation hints containing minimal identifiers/version, not authoritative replacements for API reads. Clients reconnect and revalidate authorized data after missed events. Provider delivery failures are retried outside the business transaction.
 
 OpenAPI must evolve with actual implemented routes and policies. Phase 1 tests add authentication/challenge/authorization and safe error contracts; Phase 2 adds end-to-end workflow, validation, tenant/IDOR, and concurrency assertions. See [security.md](security.md) and [development-roadmap.md](development-roadmap.md).

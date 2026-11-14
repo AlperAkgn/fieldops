@@ -1,6 +1,6 @@
 # Phase 4 Android device validation
 
-The target is a Samsung Galaxy A34. The cloud build, APK installation, phone TLS connection and device checklist are pending. The operator signs in to Expo, links the project, reviews the account quota, starts the build and installs the APK.
+**Native validation: `DEFERRED / NOT VERIFIED`.** The target is a Samsung Galaxy A34. The documented cloud build, APK installation, phone TLS connection and physical-device checklist can resume when the owner schedules acceptance. Phase 5 development has been authorized while these checks remain deferred.
 
 ## Select the APK profile
 
@@ -127,7 +127,7 @@ Prepare an activated technician invited to a Technician workspace, an owner or m
 | 13 | Start with a fresh session. Disable phone connectivity while editing a note, then attempt to save. Observe the error and retained draft. Reconnect, reload and verify the order before explicitly retrying. Confirm that the note is saved once. | NOT RUN |
 | 14 | Background the app and return while online. Verify that profile and order data revalidate. Revoke the test session from the web session view while the app is backgrounded, then return and verify that sign-in is required and private data is cleared. | NOT RUN |
 
-Use separate test orders for conflict, network interruption and completion if those checks would interfere. Capture the observed result and a sanitized screenshot or correlation ID for any failure. Phase 5 readiness remains **NOT READY** pending the recorded device results.
+Use separate test orders for conflict, network interruption and completion if those checks would interfere. Capture the observed result and a sanitized screenshot or correlation ID for any failure. The native acceptance gate remains open. Use a fresh SQLCipher-enabled build to run the additional [Phase 5 checks](mobile.md#phase-5-native-acceptance).
 
 ## Preparation evidence from 2026-11-12
 

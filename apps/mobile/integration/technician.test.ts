@@ -3,6 +3,9 @@ import { MobileSession } from '../src/auth/session';
 import { NativeTransport } from '../src/api/transport';
 import { TechnicianApi } from '../src/features/orders';
 import type { Checklist, TokenPair, WorkOrder } from '../src/api/contracts';
+import { DatabaseSync } from 'node:sqlite';
+import { OfflineStore, type PullPage } from '../src/offline/store';
+import { SyncEngine, type PushResult } from '../src/offline/engine';
 const origin = process.env.FIELDOPS_MOBILE_TEST_API;
 if (!origin || !process.env.FIELDOPS_MOBILE_TEST_MAIL)
   throw new Error(
@@ -163,6 +166,81 @@ beforeEach(async () => {
   api = new TechnicianApi(session);
 });
 describe('real native transport + API + PostgreSQL', () => {
+  it('reconnects SQLite outbox to the real API and replays a committed note once', async () => {
+    const work = await order(true, true);
+    const db = new DatabaseSync(':memory:');
+    let clock = Date.now();
+    const store = new OfflineStore(
+      {
+        execAsync: async (sql) => db.exec(sql),
+        runAsync: async (sql, ...params) => db.prepare(sql).run(...params),
+        getAllAsync: async <T>(sql: string) => db.prepare(sql).all() as T[],
+      },
+      () => clock,
+    );
+    const deliveries: string[] = [];
+    const engine = new SyncEngine(
+      store,
+      {
+        pull: (cursor) =>
+          session.request<PullPage>(
+            `/sync/pull?protocol=1${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`,
+          ),
+        push: async (command) => {
+          const { results } = await session.request<{
+            results: (PushResult & { duplicate: boolean })[];
+          }>('/sync/push', {
+            method: 'POST',
+            body: { protocol: 1, operations: [command] },
+          });
+          const result = results[0]!;
+          deliveries.push(`${command.kind}:${result.duplicate}`);
+          if (command.kind === 'note' && !result.duplicate)
+            throw new TypeError('Response lost after commit');
+          return result;
+        },
+      },
+      () => clock,
+      () => 0,
+    );
+    try {
+      await store.initialize();
+      await engine.run();
+      const initial = (await store.snapshot()).orders.find(({ order: row }) => row.id === work.id)!;
+      expect(initial.checklist.requiredItemsComplete).toBe(false);
+      await store.enqueue(crypto.randomUUID(), work.id, work.version, {
+        kind: 'checklist',
+        itemId: initial.checklist.items[0]!.id,
+        isCompleted: true,
+      });
+      await store.enqueue(crypto.randomUUID(), work.id, work.version + 1, {
+        kind: 'note',
+        body: 'Recorded offline once',
+      });
+      await engine.run(() => false);
+      expect(deliveries).toEqual([]);
+      expect(
+        (await store.snapshot()).orders.find(({ order: row }) => row.id === work.id)?.checklist
+          .requiredItemsComplete,
+      ).toBe(true);
+      await expect(engine.run()).rejects.toThrow('Response lost after commit');
+      expect(deliveries).toEqual(['checklist:false', 'note:false']);
+      clock += 3000;
+      await engine.run();
+      expect(deliveries).toEqual(['checklist:false', 'note:false', 'note:true']);
+      expect((await store.snapshot()).operations).toEqual([]);
+      const authoritative = await api.detail(work.id);
+      expect(authoritative.order.version).toBe(work.version + 2);
+      expect(
+        (await api.comments(work.id, 1)).items.filter(
+          (item) => item.body === 'Recorded offline once',
+        ),
+      ).toHaveLength(1);
+    } finally {
+      await store.close();
+      db.close();
+    }
+  });
   it('logs in, selects the Technician membership, and lists only own assignments', async () => {
     const assigned = await order();
     const hidden = await order(false);

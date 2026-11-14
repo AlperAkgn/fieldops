@@ -18,7 +18,14 @@ import {
 } from '../components/ui';
 import { dateTime, message, statusLabel, todayRange } from './orders';
 import { useApi, useWorkspace } from './queries';
+import { useOffline } from '../offline/runtime';
+import { OfflineOrders } from '../offline/screens';
 export function OrdersScreen({ today = false }: { today?: boolean }) {
+  const { offline, snapshot } = useOffline();
+  if (offline || snapshot?.rebuilding) return <OfflineOrders />;
+  return <OnlineOrders today={today} />;
+}
+function OnlineOrders({ today }: { today: boolean }) {
   const { api, state, scope } = useApi();
   const workspace = useWorkspace();
   const [search, setSearch] = useState('');

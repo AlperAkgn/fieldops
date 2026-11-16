@@ -8,7 +8,8 @@ public sealed record SyncPushRequest(int Protocol, IReadOnlyList<SyncOperation> 
 public sealed record SyncOperationResult(Guid Id, string Status, long? Version = null, string? Code = null, bool Duplicate = false);
 public sealed record SyncPushResponse(IReadOnlyList<SyncOperationResult> Results);
 public sealed record SyncOrder(WorkOrderDto Order, WorkOrderChecklistDto Checklist, IReadOnlyList<WorkOrderCommentDto> Notes);
-public sealed record SyncPullResponse(string Cursor, bool HasMore, DateTimeOffset ServerTime, IReadOnlyList<SyncOrder> Orders);
+public sealed record SyncPullResponse(string Cursor, bool HasMore, DateTimeOffset ServerTime, IReadOnlyList<SyncOrder> Orders,
+    string TimeZoneId);
 
 public interface ISyncService
 {

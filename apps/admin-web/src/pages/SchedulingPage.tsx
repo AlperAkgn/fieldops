@@ -3,38 +3,42 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, ArrowRight, CalendarDays } from 'lucide-react';
 import { api, queryString } from '../api/client';
-import type { Page, Technician, WorkOrder } from '../api/contracts';
+import type { Organization, Page, Technician, WorkOrder } from '../api/contracts';
 import { useSession } from '../api/session';
-import { dateTime } from '../api/hooks';
+import { calendarDay, calendarPeriod, displayScheduleTime, moveSchedule } from '../api/calendar';
 import { ScheduleDialog } from '../components/OrderActions';
 import { Badge, Empty, ErrorBox, PageHeader, Pagination, Panel, Skeleton } from '../components/ui';
 
-function dateKey(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
 export function SchedulingPage() {
   const session = useSession();
-  const [anchor, setAnchor] = useState(dateKey(new Date()));
+  const scope = [session?.tenantId, session?.userId, session?.role, session?.sessionId];
+  const organizations = useQuery({
+    queryKey: [...scope, 'organizations'],
+    queryFn: ({ signal }) => api<Organization[]>('/organizations', { signal }),
+  });
+  const timeZone = organizations.data?.find((row) => row.id === session?.tenantId)?.timeZoneId;
+  if (!timeZone)
+    return organizations.error ? <ErrorBox error={organizations.error} /> : <Skeleton />;
+  return <WorkspaceSchedule key={session?.sessionId} timeZone={timeZone} />;
+}
+
+function WorkspaceSchedule({ timeZone }: { timeZone: string }) {
+  const session = useSession();
+  const [anchor, setAnchor] = useState(() => calendarDay(timeZone).toString());
   const [weekly, setWeekly] = useState(() => window.matchMedia('(min-width: 760px)').matches);
   const [technician, setTechnician] = useState('');
   const [techSearch, setTechSearch] = useState('');
   const [techPage, setTechPage] = useState(1);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<WorkOrder | null>(null);
-  const start = new Date(`${anchor}T00:00:00`);
-  if (weekly) start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
-  const end = new Date(start);
-  end.setDate(end.getDate() + (weekly ? 7 : 1));
-  const days = Array.from({ length: weekly ? 7 : 1 }, (_, index) => {
-    const value = new Date(start);
-    value.setDate(value.getDate() + index);
-    return value;
-  });
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [move, setMove] = useState<{ start: string; end: string } | null>(null);
+  const { days, from, to } = calendarPeriod(anchor, timeZone, weekly);
   const params = queryString({
     page,
     pageSize: 100,
-    plannedFrom: start.toISOString(),
-    plannedTo: end.toISOString(),
+    plannedFrom: from,
+    plannedTo: to,
     technicianUserId: technician,
     sortBy: 'plannedStartAt',
     descending: false,
@@ -68,9 +72,8 @@ export function SchedulingPage() {
       ),
   });
   function shift(amount: number) {
-    const value = new Date(`${anchor}T00:00:00`);
-    value.setDate(value.getDate() + amount * (weekly ? 7 : 1));
-    setAnchor(dateKey(value));
+    const date = calendarPeriod(anchor, timeZone, false).days[0]!.date;
+    setAnchor(date.add({ days: amount * (weekly ? 7 : 1) }).toString());
     setPage(1);
   }
   return (
@@ -78,7 +81,7 @@ export function SchedulingPage() {
       <PageHeader
         eyebrow="TIME, WELL PLANNED"
         title="Team schedule"
-        description={`Plan with confidence. Times shown in ${Intl.DateTimeFormat().resolvedOptions().timeZone}.`}
+        description={`Times shown in ${timeZone}.`}
       >
         <Link className="btn primary" to="/work-orders">
           <CalendarDays size={17} />
@@ -131,7 +134,7 @@ export function SchedulingPage() {
           <button
             className="btn secondary"
             onClick={() => {
-              setAnchor(dateKey(new Date()));
+              setAnchor(calendarDay(timeZone).toString());
               setPage(1);
             }}
           >
@@ -185,14 +188,25 @@ export function SchedulingPage() {
         ) : (
           <>
             <div className={`calendar ${weekly ? 'week' : 'day'}`}>
-              {days.map((day) => (
+              {days.map(({ date, from: dayFrom, to: dayTo }) => (
                 <section
-                  className={`calendar-day ${dateKey(day) === dateKey(new Date()) ? 'today' : ''}`}
-                  key={dateKey(day)}
+                  className={`calendar-day ${date.equals(calendarDay(timeZone)) ? 'today' : ''}`}
+                  key={date.toString()}
+                  onDragOver={(event) => {
+                    if (dragging) event.preventDefault();
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const item = query.data.items.find((entry) => entry.id === dragging);
+                    setDragging(null);
+                    if (!item?.plannedStartAt || !item.plannedEndAt) return;
+                    setMove(moveSchedule(item.plannedStartAt, item.plannedEndAt, date, timeZone));
+                    setSelected(item);
+                  }}
                 >
                   <div className="calendar-day-heading">
-                    <span>{new Intl.DateTimeFormat('en', { weekday: 'short' }).format(day)}</span>
-                    <strong>{day.getDate()}</strong>
+                    <span>{date.toLocaleString('en', { weekday: 'short' })}</span>
+                    <strong>{date.day}</strong>
                   </div>
                   <div className="calendar-day-body">
                     {query.data.items
@@ -200,20 +214,32 @@ export function SchedulingPage() {
                         (order) =>
                           order.plannedStartAt &&
                           order.plannedEndAt &&
-                          new Date(order.plannedStartAt) <
-                            new Date(new Date(day).setDate(day.getDate() + 1)) &&
-                          new Date(order.plannedEndAt) > day,
+                          Date.parse(order.plannedStartAt) < Date.parse(dayTo) &&
+                          Date.parse(order.plannedEndAt) > Date.parse(dayFrom),
                       )
                       .map((order) => (
                         <article
                           className={`calendar-event priority-${order.priority.toLowerCase()}`}
                           key={order.id}
+                          draggable={['Scheduled', 'Assigned'].includes(order.status)}
+                          onDragStart={(event) => {
+                            event.dataTransfer.setData('text/plain', order.id);
+                            setDragging(order.id);
+                          }}
+                          onDragEnd={() => setDragging(null)}
                         >
-                          <small>{dateTime(order.plannedStartAt)}</small>
+                          <small>{displayScheduleTime(order.plannedStartAt, timeZone)}</small>
                           <Link to={`/work-orders/${order.id}`}>{order.title}</Link>
                           <Badge>{order.status}</Badge>
                           {['Scheduled', 'Assigned'].includes(order.status) && (
-                            <button onClick={() => setSelected(order)}>Reschedule</button>
+                            <button
+                              onClick={() => {
+                                setMove(null);
+                                setSelected(order);
+                              }}
+                            >
+                              Reschedule
+                            </button>
                           )}
                         </article>
                       ))}
@@ -231,7 +257,9 @@ export function SchedulingPage() {
           </>
         )}
       </Panel>
-      {selected && <ScheduleDialog order={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <ScheduleDialog order={selected} proposal={move} onClose={() => setSelected(null)} />
+      )}
     </>
   );
 }

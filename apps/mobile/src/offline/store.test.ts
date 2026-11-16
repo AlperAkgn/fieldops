@@ -97,10 +97,20 @@ describe('offline SQLite and synchronization', () => {
     });
     await first.store.enqueue('second', 'a', 2, { kind: 'start' });
     await first.store.mark('first', 'sending', 1);
+    first.db.exec('ALTER TABLE sync_state DROP COLUMN timeZoneId; PRAGMA user_version = 1;');
     first.close();
     const second = open(file);
     await second.store.initialize();
     const snapshot = await second.store.snapshot();
+    expect(snapshot.timeZoneId).toBeNull();
+    await second.store.applyPage({
+      orders: [],
+      cursor: 'cursor-2',
+      hasMore: false,
+      serverTime: new Date(time).toISOString(),
+      timeZoneId: 'America/New_York',
+    });
+    expect((await second.store.snapshot()).timeZoneId).toBe('America/New_York');
     expect(snapshot.operations[0]).toMatchObject({ state: 'retry', attempts: 1 });
     expect(snapshot.orders[0]?.checklist.requiredItemsComplete).toBe(true);
     expect(snapshot.orders[0]?.order.status).toBe('InProgress');

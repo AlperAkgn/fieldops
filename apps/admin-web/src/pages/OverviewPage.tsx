@@ -244,6 +244,19 @@ export function OverviewPage({ reports = false }: { reports?: boolean }) {
                 </Link>
               </Panel>
             </div>
+            {reports && data.execution && (
+              <Panel title="Execution and schedule">
+                <p>
+                  Average elapsed time: {data.execution.averageMinutes ?? 'Unavailable'}
+                  {data.execution.averageMinutes !== null ? ' minutes' : ''}
+                </p>
+                <p>Completed orders with recorded times: {data.execution.measuredCompletions}</p>
+                <p>
+                  Active work orders with technician overlaps:{' '}
+                  {data.execution.overlappingAssignments}
+                </p>
+              </Panel>
+            )}
             {reports && (
               <Panel
                 title="Technician workload"

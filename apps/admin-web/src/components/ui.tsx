@@ -190,15 +190,18 @@ export function Modal({
     return () => {
       element?.close();
       document.body.style.overflow = previousOverflow;
-      if (returnFocusRef) returnFocusRef.current = previousFocus;
       if (previousFocus?.isConnected && previousFocus !== document.body) previousFocus.focus();
       // A connected trigger may still be disabled or inert during a mutation.
       if (
         !previousFocus ||
         previousFocus === document.body ||
         document.activeElement !== previousFocus
-      )
+      ) {
         document.getElementById('main')?.focus();
+        if (returnFocusRef) returnFocusRef.current = previousFocus;
+      } else if (returnFocusRef) {
+        returnFocusRef.current = null;
+      }
     };
   }, [returnFocusRef]);
   return (

@@ -114,27 +114,43 @@ export function dateTime(value: string | null, timeZone: string) {
     : 'Not scheduled';
 }
 // Resolve local calendar boundaries rather than assuming every day has 24 hours.
+export function upcomingRange(timeZone: string, now: Date) {
+  return { plannedFrom: now.toISOString(), plannedTo: calendarBoundaries(timeZone, now)(7) };
+}
+
 export function todayRange(timeZone: string, now = new Date()) {
+  const boundary = calendarBoundaries(timeZone, now);
+  return { plannedFrom: boundary(0), plannedTo: boundary(1) };
+}
+
+function calendarBoundaries(timeZone: string, now: Date) {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone,
+    calendar: 'iso8601',
+    numberingSystem: 'latn',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   });
-  const date = (ms: number) => formatter.format(new Date(ms));
-  const target = date(now.getTime());
-  function boundary(end: boolean) {
-    let low = now.getTime() - 48 * 3600_000;
-    let high = now.getTime() + 48 * 3600_000;
+  const date = (instant: Date) => {
+    const parts = formatter.formatToParts(instant);
+    return ['year', 'month', 'day']
+      .map((type) => parts.find((part) => part.type === type)!.value)
+      .join('-');
+  };
+  const localDate = date(now);
+  return (days: number) => {
+    // Advance the calendar date independently of UTC offsets, then locate its start in the zone.
+    const anchor = new Date(`${localDate}T00:00:00.000Z`);
+    anchor.setUTCDate(anchor.getUTCDate() + days);
+    const target = anchor.toISOString().slice(0, 10);
+    let low = anchor.getTime() - 48 * 3600_000;
+    let high = anchor.getTime() + 48 * 3600_000;
     while (high - low > 1) {
       const middle = Math.floor((low + high) / 2);
-      if (date(middle) < target || (end && date(middle) === target)) low = middle;
+      if (date(new Date(middle)) < target) low = middle;
       else high = middle;
     }
-    return high;
-  }
-  return {
-    plannedFrom: new Date(boundary(false)).toISOString(),
-    plannedTo: new Date(boundary(true)).toISOString(),
+    return new Date(high).toISOString();
   };
 }

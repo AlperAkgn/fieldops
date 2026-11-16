@@ -120,6 +120,14 @@ internal sealed class WorkOrderService(FieldOpsDbContext database, OperationalWr
         database.WorkOrders.Add(order);
         RecordStatus(order, null, actor.UserId, now, null);
         writes.Audit(ResourceType, order.Id, "created");
+        if (order.Priority == WorkOrderPriority.Critical)
+        {
+            var recipients = await database.OrganizationMemberships.AsNoTracking().Where(member => member.TenantId == actor.TenantId &&
+                member.IsActive && (member.Role == OrganizationRole.OrganizationOwner || member.Role == OrganizationRole.Manager))
+                .Select(member => member.UserId).ToListAsync(cancellationToken);
+            foreach (var user in recipients)
+                database.InboxNotifications.Add(new(Guid.NewGuid(), actor.TenantId, user, order.Id, order.Version, "critical_order_created", now));
+        }
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return ToDto(order);

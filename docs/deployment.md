@@ -2,7 +2,7 @@
 
 ## Current scope
 
-The local stack runs the Phase 1 identity API, PostgreSQL, Mailpit, and MinIO. The web and mobile foundation screens run on the host.
+The local stack runs the FieldOps API, PostgreSQL, Mailpit, and MinIO. The admin web and Expo development server run on the host.
 
 ## Prerequisites
 
@@ -57,9 +57,9 @@ PostgreSQL 18 stores data under the versioned directory within `/var/lib/postgre
 | API HTTPS | `https://localhost:5443` | Web authentication, probes and development OpenAPI |
 | PostgreSQL | `localhost:5432` | Development database |
 | Mailpit | `http://localhost:8025` and SMTP `localhost:1025` | Local confirmation, recovery, and invitation capture |
-| MinIO S3 | `http://localhost:9000` | Local object storage; application integration is Phase 6 |
+| MinIO S3 | `http://localhost:9000` | Private local attachment storage |
 | MinIO console | `http://localhost:9001` | Local object browser; credentials from `.env` |
-| Web (host-run) | `https://localhost:5173` | Foundation status screen |
+| Web (host-run) | `https://localhost:5173` | Admin workspace |
 
 The API, PostgreSQL, Mailpit, and storage ports bind to loopback by default. The HTTPS development port stays on loopback. For mobile health testing on a trusted development network, set `API_BIND_ADDRESS` to the host's LAN address and recreate the API container. Outside Development, the API requires HTTPS for `/api/v1`.
 
@@ -134,3 +134,11 @@ After new migrations are introduced in later phases, first run `docker compose b
 ## Before staging or production
 
 Phase 7/8 must deliver separate runtime and migration database roles, verified tenant isolation, TLS/reverse proxy and explicit allowed origins, managed secrets, a maintained object-store decision, backup/restore drills, migration rollout/rollback planning, OpenTelemetry collection, log retention, rate limits, dependency review, and release acceptance. The current development superuser credentials, HTTP listener, and MinIO setup are local-only choices. No production environment or demo credentials exist yet.
+
+## Phase 6 collaboration configuration
+
+The local Compose API connects to MinIO using `ObjectStorage__Endpoint`, `ObjectStorage__Bucket`, `ObjectStorage__AccessKey`, `ObjectStorage__SecretKey` and optional `ObjectStorage__Region`. Local Compose enables private bucket initialization on the first upload. Production uses an existing private bucket, HTTPS and a restricted service credential with access only to the attachment bucket. Keep secrets outside Git and client bundles. [Provider decision](adr/0002-local-object-storage.md)
+
+`ExpoPush__AccessToken` enables the outbound Expo provider. Configure the native application project and FCM v1/APNs credentials separately. Keep the API token in server secret configuration. The dispatcher records deferred delivery, provider tickets and receipt outcomes. Leave the access token unset for local in-app notification testing. Native push remains `DEFERRED / NOT VERIFIED`. [Expo ticket and receipt contract](https://docs.expo.dev/push-notifications/sending-notifications/)
+
+Permit SignalR WebSocket upgrades at `/api/v1/live`, forward only configured web origins, and suppress query strings in proxy logs for that path. Run one API replica until a distributed SignalR deployment is validated. The application uses committed PostgreSQL events and clients refetch when reconnecting.

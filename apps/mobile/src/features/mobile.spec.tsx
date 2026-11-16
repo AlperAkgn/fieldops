@@ -21,6 +21,33 @@ import { OfflineProvider } from '../offline/runtime';
 import { openOfflineVault } from '../offline/vault';
 import type { OfflineSnapshot, OfflineStore } from '../offline/store';
 import WorkOrderRoute from '../app/work-orders/[id]';
+import { enablePush, PushLifecycle } from './notifications';
+import { MobileAttachments } from './attachments';
+import * as SecureStore from 'expo-secure-store';
+import * as ImagePicker from 'expo-image-picker';
+import * as Notifications from 'expo-notifications';
+import { File } from 'expo-file-system';
+import { shareAsync } from 'expo-sharing';
+jest.mock('expo-image-picker', () => ({ requestCameraPermissionsAsync: jest.fn() }));
+jest.mock('expo-file-system', () => ({
+  Paths: { cache: { uri: 'file:///cache' } },
+  File: jest.fn(),
+  Directory: jest.fn(() => ({ exists: false })),
+}));
+jest.mock('expo-sharing', () => ({ isAvailableAsync: async () => true, shareAsync: jest.fn() }));
+jest.mock('expo-notifications', () => ({
+  setNotificationHandler: jest.fn(),
+  getPermissionsAsync: jest.fn(),
+  getExpoPushTokenAsync: jest.fn(),
+  addPushTokenListener: jest.fn(),
+  addNotificationResponseReceivedListener: () => ({ remove: jest.fn() }),
+  addNotificationReceivedListener: () => ({ remove: jest.fn() }),
+  getLastNotificationResponseAsync: async () => null,
+}));
+jest.mock('./push-native', () => ({
+  loadPushNotifications: async () => jest.requireMock('expo-notifications'),
+}));
+jest.mock('expo-constants', () => ({ easConfig: { projectId: 'unit-test-project' } }));
 jest.mock('expo-crypto', () => ({ randomUUID: () => '9f08cfe4-4811-41ca-983e-b6333994bf04' }));
 jest.mock('expo-network', () => ({
   getNetworkStateAsync: jest.fn(),
@@ -82,6 +109,12 @@ let rejectLogin = false;
 let writeGate: Promise<void> | null = null;
 let unassigned = false;
 let calls: { path: string; body: Record<string, unknown> }[];
+const storedAttachment = {
+  id: 'saved',
+  fileName: 'service.png',
+  contentType: 'image/png',
+  size: 3,
+};
 function response(value: unknown, status = 200) {
   return {
     ok: status < 400,
@@ -90,7 +123,13 @@ function response(value: unknown, status = 200) {
     json: async () => value,
   } as Response;
 }
-function fixture() {
+function fixture(
+  overrides: {
+    push?: (init?: RequestInit) => Promise<Response>;
+    attachment?: (init?: RequestInit) => Promise<Response>;
+    metadata?: typeof storedAttachment;
+  } = {},
+) {
   let stored: string | null = null;
   const fetcher: typeof fetch = async (url, init) => {
     const path = String(url).split('/api/v1')[1]!;
@@ -109,6 +148,19 @@ function fixture() {
         emailConfirmed: true,
       });
     if (path === '/auth/logout') return response(null, 204);
+    if (path === '/organizations/next/select')
+      return response({
+        ...token,
+        tenantId: 'next',
+        sessionId: 'next-session',
+        accessToken: 'next-access',
+      });
+    if (path.startsWith('/notifications/devices/'))
+      return overrides.push ? overrides.push(init) : response(null, 204);
+    if (path.endsWith('/attachments'))
+      return response(overrides.attachment ? [overrides.metadata ?? storedAttachment] : []);
+    if (path.endsWith('/attachments/saved') && overrides.attachment)
+      return overrides.attachment(init);
     if (path.startsWith('/sync/pull'))
       return response({
         cursor: 'cursor',
@@ -243,6 +295,247 @@ beforeEach(() => {
   calls = [];
 });
 describe('native technician components', () => {
+  it.each(['keep', 'logout', 'switch', 'unmount'] as const)(
+    'handles a token rotation during an in-flight registration (%s)',
+    async (change) => {
+      const pending = Promise.withResolvers<Response>();
+      const credentials: Array<{
+        token: string;
+        authorization: string | null;
+        signal: AbortSignal | null | undefined;
+      }> = [];
+      const ctx = fixture({
+        push: async (init) => {
+          credentials.push({
+            token: JSON.parse(String(init?.body)).token,
+            authorization: new Headers(init?.headers).get('Authorization'),
+            signal: init?.signal,
+          });
+          return credentials.length === 1 ? pending.promise : response(null, 204);
+        },
+      });
+      await ctx.session.login('a', 'b');
+      const stored = jest
+        .spyOn(SecureStore, 'getItemAsync')
+        .mockResolvedValue(
+          JSON.stringify({ id: 'device-1', userId: 'tech', origin: 'https://api.test' }),
+        );
+      const remove = jest.fn();
+      let emit!: Parameters<typeof Notifications.addPushTokenListener>[0];
+      jest.mocked(Notifications.addPushTokenListener).mockImplementation((listener) => {
+        emit = listener;
+        return { remove };
+      });
+      jest
+        .mocked(Notifications.getPermissionsAsync)
+        .mockResolvedValue({ granted: true } as Awaited<
+          ReturnType<typeof Notifications.getPermissionsAsync>
+        >);
+      jest.mocked(Notifications.getExpoPushTokenAsync).mockImplementation(async (options) => ({
+        type: 'expo',
+        data: `ExpoPushToken[${options?.devicePushToken?.data ?? 'initial'}]`,
+      }));
+      const view = ctx.mount(<PushLifecycle />);
+      try {
+        await waitFor(() => expect(credentials).toHaveLength(1));
+        act(() => {
+          emit({ type: 'ios', data: 'intermediate' });
+          emit({ type: 'ios', data: 'latest' });
+          emit({ type: 'ios', data: 'latest' });
+        });
+        if (change === 'logout')
+          await act(async () => {
+            await ctx.session.logout();
+          });
+        if (change === 'switch')
+          await act(async () => {
+            await ctx.session.selectOrganization('next');
+          });
+        if (change === 'unmount') view.unmount();
+        await act(async () => {
+          pending.resolve(response(null, 204));
+        });
+        const tokens = () => credentials.map((entry) => [entry.authorization, entry.token]);
+        if (change === 'keep') {
+          await waitFor(() =>
+            expect(tokens()).toEqual([
+              ['Bearer access', 'ExpoPushToken[initial]'],
+              ['Bearer access', 'ExpoPushToken[latest]'],
+            ]),
+          );
+          await act(async () => {
+            emit({ type: 'ios', data: 'latest' });
+          });
+          expect(credentials).toHaveLength(2);
+        } else {
+          expect(credentials[0]?.signal?.aborted).toBe(true);
+          expect(remove).toHaveBeenCalled();
+          if (change === 'switch')
+            await waitFor(() =>
+              expect(tokens()).toEqual([
+                ['Bearer access', 'ExpoPushToken[initial]'],
+                ['Bearer next-access', 'ExpoPushToken[initial]'],
+              ]),
+            );
+          else expect(credentials).toHaveLength(1);
+        }
+      } finally {
+        view.unmount();
+        stored.mockRestore();
+      }
+    },
+  );
+
+  it.each(['preview', 'pdf', 'denied', 'truncated', 'logout-pending'] as const)(
+    'opens a stored attachment through the authenticated API and cleans up (%s)',
+    async (scenario) => {
+      const create = jest.fn();
+      const remove = jest.fn();
+      const writeBytes = jest.fn<(_: Uint8Array) => Promise<void>>().mockResolvedValue(undefined);
+      const close = jest.fn();
+      const pdf = scenario === 'pdf';
+      const metadata = pdf
+        ? { ...storedAttachment, fileName: 'service.pdf', contentType: 'application/pdf' }
+        : storedAttachment;
+      const uri = `file:///cache/private-preview.${pdf ? 'pdf' : 'png'}`;
+      jest.mocked(File).mockImplementation(
+        () =>
+          ({
+            uri,
+            get exists() {
+              return create.mock.calls.length > remove.mock.calls.length;
+            },
+            create,
+            delete: remove,
+            open: () => ({ writeBytes, close }),
+          }) as unknown as jest.Mocked<File>,
+      );
+      const bytes = Uint8Array.of(1, 2, 3).slice(0, scenario === 'truncated' ? 2 : 3);
+      const download = Promise.withResolvers<void>();
+      const sent = Promise.withResolvers<AbortSignal | null | undefined>();
+      const attachment = jest.fn<(init?: RequestInit) => Promise<Response>>(async (init) => {
+        expect(new Headers(init?.headers).get('Authorization')).toEqual('Bearer access');
+        expect(init?.redirect).toBe('error');
+        if (scenario === 'denied')
+          return response({ detail: 'The attachment was not found.' }, 404);
+        sent.resolve(init?.signal);
+        const read = jest
+          .fn<() => Promise<{ done: boolean; value?: Uint8Array }>>()
+          .mockResolvedValueOnce({ done: false, value: bytes })
+          .mockResolvedValue({ done: true });
+        return {
+          ...response(null),
+          headers: new Headers({ 'content-type': metadata.contentType }),
+          body: {
+            getReader: () => ({
+              read: async () => {
+                if (scenario === 'logout-pending') await download.promise;
+                return read();
+              },
+              releaseLock: jest.fn(),
+              cancel: async () => undefined,
+            }),
+          },
+        } as unknown as Response;
+      });
+      const ctx = fixture({ attachment, metadata });
+      await ctx.session.login('a', 'b');
+      ctx.mount(<MobileAttachments id="order" />);
+      fireEvent.press(await screen.findByRole('button', { name: `View ${metadata.fileName}` }));
+      if (scenario === 'denied') {
+        await screen.findByText(/attachment was not found/i);
+        expect(create).not.toHaveBeenCalled();
+      } else if (scenario === 'truncated') {
+        await screen.findByText(/download was incomplete/i);
+        expect(remove).toHaveBeenCalledTimes(1);
+      } else if (scenario === 'pdf') {
+        fireEvent.press(await screen.findByRole('button', { name: 'Open PDF in another app' }));
+        await waitFor(() =>
+          expect(shareAsync).toHaveBeenCalledWith(uri, {
+            mimeType: 'application/pdf',
+            UTI: 'com.adobe.pdf',
+          }),
+        );
+        fireEvent.press(screen.getByRole('button', { name: 'Close attachment' }));
+        expect(remove).toHaveBeenCalledTimes(1);
+      } else if (scenario === 'logout-pending') {
+        const signal = await sent.promise;
+        await waitFor(() => expect(create).toHaveBeenCalled());
+        await act(async () => {
+          await ctx.session.logout();
+        });
+        expect(signal?.aborted).toBe(true);
+        await act(async () => {
+          download.resolve();
+        });
+        await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
+        expect(writeBytes).not.toHaveBeenCalled();
+        expect(screen.queryByLabelText('Preview of service.png')).toBeNull();
+      } else {
+        expect((await screen.findByLabelText('Preview of service.png')).props.source).toEqual({
+          uri,
+        });
+        expect(writeBytes).toHaveBeenCalledWith(bytes);
+        expect(close).toHaveBeenCalledTimes(1);
+        await act(async () => {
+          await ctx.session.logout();
+        });
+        expect(screen.queryByLabelText('Preview of service.png')).toBeNull();
+        expect(remove).toHaveBeenCalledTimes(1);
+      }
+      expect(attachment).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('explains camera denial without preventing an existing attachment selection', async () => {
+    const ctx = fixture();
+    await ctx.session.login('a', 'b');
+    jest.mocked(ImagePicker.requestCameraPermissionsAsync).mockResolvedValueOnce({
+      granted: false,
+      canAskAgain: true,
+      expires: 'never',
+      status: 'denied',
+    } as Awaited<ReturnType<typeof ImagePicker.requestCameraPermissionsAsync>>);
+    ctx.mount(<WorkOrderScreen id="order" />);
+    fireEvent.press(await screen.findByRole('button', { name: 'Take photo' }));
+    expect(await screen.findByText(/Camera permission is required/)).toBeOnTheScreen();
+    expect(screen.getByRole('button', { name: 'Choose document' })).toBeEnabled();
+  });
+  it('requests push on opt-in, registers it for this session, and revokes it on denied permission', async () => {
+    const ctx = fixture();
+    await ctx.session.login('a', 'b');
+    const stored = jest
+      .spyOn(SecureStore, 'getItemAsync')
+      .mockResolvedValue(
+        JSON.stringify({ id: 'device-1', userId: 'tech', origin: 'https://api.test' }),
+      );
+    const denied = { granted: false, canAskAgain: true };
+    const getPermissionsAsync = jest.fn<() => Promise<typeof denied>>().mockResolvedValue(denied);
+    const requestPermissionsAsync = jest
+      .fn<() => Promise<typeof denied>>()
+      .mockResolvedValue({ granted: true, canAskAgain: true });
+    const getExpoPushTokenAsync = jest
+      .fn<() => Promise<{ data: string }>>()
+      .mockResolvedValue({ data: 'ExpoPushToken[test-token]' });
+    const adapter = {
+      getPermissionsAsync,
+      requestPermissionsAsync,
+      getExpoPushTokenAsync,
+    } as unknown as Parameters<typeof enablePush>[1];
+    try {
+      expect(await enablePush(ctx.session, adapter, true)).toBe(true);
+      expect(requestPermissionsAsync).toHaveBeenCalledTimes(1);
+      expect(calls).toContainEqual({
+        path: '/notifications/devices/device-1',
+        body: { token: 'ExpoPushToken[test-token]' },
+      });
+      expect(await enablePush(ctx.session, adapter, false)).toBe(false);
+      expect(calls.at(-1)).toEqual({ path: '/notifications/devices/device-1', body: {} });
+      expect(getExpoPushTokenAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      stored.mockRestore();
+    }
+  });
   it('switches to the downloaded order on network loss and keeps a service note draft', async () => {
     const ctx = fixture();
     await ctx.session.login('a', 'b');

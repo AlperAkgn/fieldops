@@ -38,6 +38,7 @@ public abstract class IdentityTestBase : IAsyncLifetime
             {
                 services.RemoveAll<IEmailDelivery>();
                 services.AddSingleton<IEmailDelivery>(Emails);
+                ConfigureCollaborators(services);
             }));
         Client = Factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -47,6 +48,8 @@ public abstract class IdentityTestBase : IAsyncLifetime
         });
         await InDatabaseAsync(async context => await context.Database.MigrateAsync());
     }
+
+    protected virtual void ConfigureCollaborators(IServiceCollection services) { }
 
     public async Task DisposeAsync()
     {

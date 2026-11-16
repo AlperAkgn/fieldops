@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text.Json.Serialization;
 using FieldOps.Api.Endpoints;
+using FieldOps.Api.Collaboration;
+using FieldOps.Application.Collaboration;
 using FieldOps.Api.Errors;
 using FieldOps.Api.Health;
 using FieldOps.Api.Security;
@@ -65,6 +67,9 @@ if (string.IsNullOrWhiteSpace(connectionString))
 
 builder.Services.AddInfrastructure(connectionString, builder.Configuration);
 if (!migrate) builder.Services.AddApiSecurity(builder.Configuration);
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<WorkOrderConnections>();
+builder.Services.AddScoped<IOrderChangeDelivery, SignalROrderDelivery>();
 var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
@@ -104,6 +109,19 @@ app.UseStatusCodePages(async context =>
     await Results.Problem(statusCode: context.HttpContext.Response.StatusCode)
         .ExecuteAsync(context.HttpContext));
 app.UseCors();
+var socketOptions = new WebSocketOptions();
+foreach (var origin in origins) socketOptions.AllowedOrigins.Add(origin);
+app.UseWebSockets(socketOptions);
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/api/v1/live") && context.Request.Headers.Origin.Count != 0 &&
+        !origins.Contains(context.Request.Headers.Origin.ToString(), StringComparer.Ordinal))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return;
+    }
+    await next(context);
+});
 app.Use(async (context, next) =>
 {
     if (context.Request.Path.StartsWithSegments("/api/v1"))
@@ -129,6 +147,7 @@ app.MapWorkOrderDetailEndpoints();
 app.MapCatalogEndpoints();
 app.MapWorkOrderEndpoints();
 app.MapSyncEndpoints();
+app.MapCollaborationEndpoints();
 
 app.MapGet("/health/live", async (HttpContext context, HealthCheckService healthChecks) =>
 {

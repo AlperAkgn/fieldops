@@ -116,6 +116,8 @@ internal sealed class SyncService(FieldOpsDbContext database, OperationalWriteCo
             throw new FieldOpsException(ErrorKind.Unauthenticated, "session_invalid", "The current session is unavailable.");
         if (current.Role != OrganizationRole.Technician)
             throw new FieldOpsException(ErrorKind.Forbidden, "membership_changed", "Organization access changed.");
+        var timeZone = await database.Organizations.AsNoTracking().Where(row => row.Id == actor.TenantId)
+            .Select(row => row.TimeZoneId).SingleAsync(cancellationToken);
 
         // Assignment identity changes invalidate even a remove/reassign cycle between pulls.
         // Project only IDs. No prior tenant/order payload is carried in the cursor.
@@ -149,7 +151,7 @@ internal sealed class SyncService(FieldOpsDbContext database, OperationalWriteCo
         var next = cursorProtector.Protect(JsonSerializer.Serialize(
             new CursorState(actor.TenantId, actor.UserId, actor.SessionId, authorization, position, now)));
         await transaction.CommitAsync(cancellationToken);
-        return new(next, more, now, result);
+        return new(next, more, now, result, timeZone);
     }
 
     private CursorState? ReadCursor(string? cursor, DateTimeOffset now)

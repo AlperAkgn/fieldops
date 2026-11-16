@@ -1,6 +1,7 @@
 using System.Text;
 using FieldOps.Application.Identity;
 using FieldOps.Application.Catalog;
+using FieldOps.Application.Collaboration;
 using FieldOps.Application.WorkOrders;
 using FieldOps.Application.Operations;
 using FieldOps.Application.Organizations;
@@ -11,6 +12,7 @@ using FieldOps.Infrastructure.Email;
 using FieldOps.Infrastructure.Health;
 using FieldOps.Infrastructure.Identity;
 using FieldOps.Infrastructure.Catalog;
+using FieldOps.Infrastructure.Collaboration;
 using FieldOps.Infrastructure.WorkOrders;
 using FieldOps.Infrastructure.Operations;
 using FieldOps.Infrastructure.Organizations;
@@ -47,6 +49,14 @@ public static class DependencyInjection
         services.AddScoped<WorkOrderDetailService>();
         services.AddScoped<IWorkOrderDetailService>(provider => provider.GetRequiredService<WorkOrderDetailService>());
         services.AddScoped<ISyncService, SyncService>();
+        services.AddScoped<CollaborationService>();
+        services.AddScoped<ICollaborationAccess>(provider => provider.GetRequiredService<CollaborationService>());
+        services.AddScoped<INotifications>(provider => provider.GetRequiredService<CollaborationService>());
+        services.AddScoped<IAttachments, AttachmentService>();
+        services.AddSingleton<IAttachmentStorage, S3AttachmentStorage>();
+        services.AddScoped<ICollaborationDispatcher, CollaborationDispatcher>();
+        services.AddHttpClient<IPushProvider, ExpoPushProvider>(client => client.Timeout = TimeSpan.FromSeconds(4));
+        services.AddHostedService<CollaborationWorker>();
         if (configuration is not null) services.AddIdentityInfrastructure(configuration);
 
         return services;

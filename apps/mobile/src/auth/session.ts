@@ -321,7 +321,14 @@ export class MobileSession {
         await this.erase('Your workspace access changed. Sign in again.');
     });
   }
-  async request<T>(path: string, options: Omit<RequestOptions, 'token'> = {}): Promise<T> {
+  async request<T>(
+    path: string,
+    {
+      expectedScope,
+      ...options
+    }: Omit<RequestOptions, 'token'> & { expectedScope?: OfflineIdentity } = {},
+    consume?: (response: Response) => Promise<T>,
+  ): Promise<T> {
     if (this.refreshing) await this.refreshing;
     if (this.state.busy)
       throw new ApiError(0, 'session_busy', 'Wait for the session operation to finish.');
@@ -330,11 +337,17 @@ export class MobileSession {
     const access = this.state.access;
     const generation = this.generation;
     if (!access) throw new ApiError(401, 'session_required', 'Please sign in again.');
+    if (options.signal?.aborted || (expectedScope && !sameOfflineScope(access, expectedScope)))
+      throw new ApiError(0, 'scope_changed', 'Workspace changed. Reload current data.');
     try {
-      const result = await this.transport.request<T>(path, {
-        ...options,
-        token: access.accessToken,
-      });
+      const result = await this.transport.request<T>(
+        path,
+        {
+          ...options,
+          token: access.accessToken,
+        },
+        consume,
+      );
       if (generation !== this.generation)
         throw new ApiError(0, 'scope_changed', 'Workspace changed. Reload current data.');
       return result;

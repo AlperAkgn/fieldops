@@ -6,6 +6,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { configurationError, queryClient, SessionProvider, useSession } from '../auth/runtime';
 import { Screen, ErrorBox } from '../components/ui';
 import { OfflineProvider } from '../offline/runtime';
+import { LiveUpdates } from '../features/live';
+import { PushLifecycle } from '../features/notifications';
 
 function Navigation() {
   const { state } = useSession();
@@ -18,6 +20,7 @@ function Navigation() {
       </Stack.Protected>
       <Stack.Protected guard={admitted}>
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="notifications" />
       </Stack.Protected>
       <Stack.Protected
         guard={admitted && (state.access?.role ?? state.offline?.role) === 'Technician'}
@@ -43,6 +46,8 @@ export default function RootLayout() {
         <SessionProvider>
           <StatusBar style="dark" />
           <OfflineProvider>
+            <LiveUpdates />
+            <PushLifecycle />
             <Navigation />
           </OfflineProvider>
         </SessionProvider>

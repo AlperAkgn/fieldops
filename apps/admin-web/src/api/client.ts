@@ -1,7 +1,7 @@
 import { getApiOrigin } from './health';
 import type { Access } from './contracts';
 
-function apiOrigin() {
+export function apiOrigin() {
   const origin = getApiOrigin(import.meta.env.VITE_API_BASE_URL || 'https://localhost:5443');
   if (!origin.startsWith('https://'))
     throw new Error('Authentication requires an HTTPS API origin.');
@@ -178,4 +178,15 @@ export function queryString(values: Record<string, string | number | boolean | u
     if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
   });
   return params.toString();
+}
+
+export async function binaryAuthorization(sessionId: string) {
+  const current = access;
+  const role = current?.role;
+  if (!current || current.sessionId !== sessionId)
+    throw new DOMException('Workspace changed.', 'AbortError');
+  if (Date.parse(current.expiresAt) < Date.now() + 30_000) await refresh();
+  if (!access || access.sessionId !== sessionId || access.role !== role)
+    throw new DOMException('Workspace changed.', 'AbortError');
+  return { origin: apiOrigin(), token: access.accessToken };
 }

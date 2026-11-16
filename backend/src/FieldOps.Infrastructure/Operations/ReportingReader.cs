@@ -89,11 +89,25 @@ internal sealed class ReportingReader(FieldOpsDbContext database, OperationalWri
         if (filter.To is { } activityTo) activities = activities.Where(log => log.OccurredAt < activityTo.ToUniversalTime());
         var recent = await activities.OrderByDescending(log => log.OccurredAt).ThenBy(log => log.Id).Take(8)
             .Select(log => new ActivityDto(log.Id, log.ResourceType, log.ResourceId, log.Action, log.OccurredAt)).ToListAsync(cancellationToken);
+        var measured = await orders.Where(order => order.Status == WorkOrderStatus.Completed && order.ActualStartAt != null && order.ActualEndAt != null)
+            .GroupBy(_ => 1).Select(group => new
+            {
+                Count = group.Count(),
+                Average = group.Average(order => (order.ActualEndAt!.Value - order.ActualStartAt!.Value).TotalMinutes)
+            }).SingleOrDefaultAsync(cancellationToken);
+        var assignments = database.WorkOrderAssignments.AsNoTracking().Where(row => row.TenantId == tenantId && row.RemovedAt == null);
+        var overlaps = await (from assignment in assignments
+                              join order in active on assignment.WorkOrderId equals order.Id
+                              where order.PlannedStartAt != null && assignments.Any(other => other.TechnicianUserId == assignment.TechnicianUserId
+                                  && other.WorkOrderId != order.Id && active.Any(candidate => candidate.Id == other.WorkOrderId
+                                      && candidate.PlannedStartAt < order.PlannedEndAt && candidate.PlannedEndAt > order.PlannedStartAt))
+                              select order.Id).Distinct().CountAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new OperationsReportDto(total, activeCount, completed, overdue, technicianCount,
             total == 0 ? 0 : Math.Round(100m * completed / total, 1),
             statuses.Select(value => new DistributionDto(value.Name.ToString(), value.Count)).ToList(),
             priorities.Select(value => new DistributionDto(value.Name.ToString(), value.Count)).ToList(),
-            workload.Select(user => new WorkloadDto(user.UserId, user.DisplayName, user.ActiveOrders)).ToList(), upcoming, recent);
+            workload.Select(user => new WorkloadDto(user.UserId, user.DisplayName, user.ActiveOrders)).ToList(), upcoming, recent,
+            new ExecutionMetrics(measured?.Count ?? 0, measured is null ? null : Math.Round((decimal)measured.Average, 1), overlaps));
     }
 }

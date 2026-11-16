@@ -11,6 +11,7 @@ const OverviewPage = lazy(() =>
   import('./pages/OverviewPage').then((module) => ({ default: module.OverviewPage })),
 );
 import { SchedulingPage } from './pages/SchedulingPage';
+import { NotificationsPage } from './pages/NotificationsPage';
 import { TeamPage, SettingsPage, TemplatesPage } from './pages/ManagementPages';
 function Home() {
   const session = useSession();
@@ -58,6 +59,7 @@ export default function App() {
                 />
                 <Route path="work-orders" element={<WorkOrdersPage />} />
                 <Route path="work-orders/:id" element={<WorkOrderDetailPage />} />
+                <Route path="notifications" element={<NotificationsPage />} />
                 {(['customers', 'service-locations', 'assets', 'asset-categories'] as const).map(
                   (kind) => (
                     <Route key={kind} path={kind} element={<CatalogPage kind={kind} />} />

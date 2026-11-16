@@ -49,6 +49,15 @@ public static class ApiSecurity
             };
             options.Events = new JwtBearerEvents
             {
+                OnMessageReceived = context =>
+                {
+                    // Browser WebSocket clients cannot set the Authorization header.
+                    if (context.HttpContext.WebSockets.IsWebSocketRequest &&
+                        context.Request.Path == "/api/v1/live" &&
+                        context.Request.Query.TryGetValue("access_token", out var token) && token.Count == 1)
+                        context.Token = token[0];
+                    return Task.CompletedTask;
+                },
                 OnTokenValidated = async context =>
                 {
                     var principal = context.Principal!;

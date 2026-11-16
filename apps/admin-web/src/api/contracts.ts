@@ -195,6 +195,11 @@ export interface Session {
   expiresAt: string;
 }
 export interface Report {
+  execution?: {
+    measuredCompletions: number;
+    averageMinutes: number | null;
+    overlappingAssignments: number;
+  };
   totalOrders: number;
   activeOrders: number;
   completedOrders: number;

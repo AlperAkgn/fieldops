@@ -6,6 +6,7 @@ import type { Checklist, TokenPair, WorkOrder } from '../src/api/contracts';
 import { DatabaseSync } from 'node:sqlite';
 import { OfflineStore, type PullPage } from '../src/offline/store';
 import { SyncEngine, type PushResult } from '../src/offline/engine';
+import { HubConnectionBuilder, HttpTransportType, LogLevel } from '@microsoft/signalr';
 const origin = process.env.FIELDOPS_MOBILE_TEST_API;
 if (!origin || !process.env.FIELDOPS_MOBILE_TEST_MAIL)
   throw new Error(
@@ -166,6 +167,86 @@ beforeEach(async () => {
   api = new TechnicianApi(session);
 });
 describe('real native transport + API + PostgreSQL', () => {
+  it('receives assigned order hints and recovers through authorized reads after disconnection', async () => {
+    const access = session.snapshot().access!;
+    const connection = new HubConnectionBuilder()
+      .configureLogging(LogLevel.None)
+      .withUrl(`${session.transport.origin}/api/v1/live`, {
+        transport: HttpTransportType.WebSockets,
+        accessTokenFactory: () => access.accessToken,
+        withCredentials: false,
+      })
+      .build();
+    const committed = await order(true, false);
+    const live = Promise.withResolvers<number>();
+    connection.on('OrderChanged', (hint: { workOrderId: string | null; version: number }) => {
+      if (hint.workOrderId === committed.id && hint.version > committed.version)
+        live.resolve(hint.version);
+    });
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await connection.start();
+      const started = await api.action(committed.id, 'start', committed.version);
+      deadline = setTimeout(
+        () => live.reject(new Error('No committed SignalR event received.')),
+        8000,
+      );
+      expect(await live.promise).toBe(started.version);
+      await connection.stop();
+      const paused = await api.action(committed.id, 'pause', started.version);
+      await connection.start();
+      const row = (await api.detail(committed.id)).order;
+      expect(row).toMatchObject({ version: paused.version, status: 'OnHold' });
+    } finally {
+      clearTimeout(deadline);
+      await connection.stop();
+    }
+  });
+  it('reads the assigned technician inbox and uploads a private attachment without duplicates', async () => {
+    const work = await order();
+    const inbox = await session.request<{
+      items: { id: string; workOrderId: string; readAt: string | null }[];
+    }>('/notifications');
+    const alert = inbox.items.find((item) => item.workOrderId === work.id);
+    expect(alert).toBeDefined();
+    await session.request(`/notifications/${alert!.id}/read`, { method: 'POST' });
+    const updated = await session.request<typeof inbox>('/notifications');
+    expect(updated.items.find((item) => item.id === alert!.id)?.readAt).toBeTruthy();
+    const origin = session.transport.origin;
+    const path = `/api/v1/work-orders/${work.id}/attachments`;
+    const access = session.snapshot().access!;
+    const body = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=',
+      'base64',
+    );
+    const headers = {
+      Authorization: `Bearer ${access.accessToken}`,
+      'Content-Type': 'image/png',
+      'X-File-Name': 'technician.png',
+      'Idempotency-Key': crypto.randomUUID(),
+    };
+    async function upload() {
+      const response = await fetch(origin + path, { method: 'POST', headers, body });
+      expect(response.status).toBe(201);
+      return (await response.json()) as { id: string };
+    }
+    const first = await upload();
+    expect(await upload()).toEqual(first);
+    expect(await session.request(`/work-orders/${work.id}/attachments`)).toHaveLength(1);
+    const unauthorized = await fetch(`${origin}${path}/${first.id}`, {
+      headers: { Authorization: `Bearer ${other.accessToken}` },
+    });
+    expect(unauthorized.status).toBe(404);
+    const allowed = await session.request(
+      `/work-orders/${work.id}/attachments/${first.id}`,
+      { expectedScope: access },
+      async (response) => {
+        expect(response.headers.get('content-type')).toBe('image/png');
+        return Buffer.from(await response.arrayBuffer());
+      },
+    );
+    expect(allowed).toEqual(body);
+  });
   it('reconnects SQLite outbox to the real API and replays a committed note once', async () => {
     const work = await order(true, true);
     const db = new DatabaseSync(':memory:');

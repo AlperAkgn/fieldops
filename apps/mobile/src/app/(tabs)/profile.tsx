@@ -1,6 +1,7 @@
 import { copy } from '../../i18n/en';
 import { useState } from 'react';
 import { Text, View } from 'react-native';
+import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { useApi, useWorkspace } from '../../features/queries';
 import { message, statusLabel } from '../../features/orders';
@@ -84,6 +85,7 @@ export default function Profile() {
           ))}
       </Card>
       <Card>
+        <Button title="Notifications" secondary onPress={() => router.push('/notifications')} />
         <Text style={styles.label}>{copy.onlineService}</Text>
         <Text style={styles.subtitle}>
           {offline.offline

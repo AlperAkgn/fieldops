@@ -2,6 +2,7 @@ using FieldOps.Application.Common;
 using FieldOps.Application.Identity;
 using FieldOps.Application.Tenancy;
 using FieldOps.Domain.Operations;
+using FieldOps.Domain.WorkOrders;
 using FieldOps.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -11,6 +12,13 @@ namespace FieldOps.Infrastructure.Operations;
 internal sealed class OperationalWriteContext(FieldOpsDbContext database, TenantContext tenant,
     ISessionValidator sessions, TimeProvider clock)
 {
+    public void AttachmentAdded(Guid orderId, long version)
+    {
+        var audit = AuditLog.Record(Actor.TenantId, Actor.UserId, "work_order", orderId, "attachment_added", null, Now);
+        database.AuditLogs.Add(audit);
+        database.WorkOrderEvents.Add(new(audit.Id, Actor.TenantId, orderId, version, "attachment_added", audit.OccurredAt, []));
+    }
+
     public TenantActor Actor => tenant.Actor ??
         throw new FieldOpsException(ErrorKind.Unauthenticated, "authentication_required", "Authentication is required.");
 
@@ -45,7 +53,24 @@ internal sealed class OperationalWriteContext(FieldOpsDbContext database, Tenant
     }
 
     public void Audit(string resourceType, Guid resourceId, string action, string? reason = null,
-        WorkOrderAuditMetadata? metadata = null, DateTimeOffset? occurredAt = null) =>
-        database.AuditLogs.Add(AuditLog.Record(Actor.TenantId, Actor.UserId, resourceType, resourceId, action, reason,
-            occurredAt ?? Now, metadata));
+        WorkOrderAuditMetadata? metadata = null, DateTimeOffset? occurredAt = null)
+    {
+        var audit = AuditLog.Record(Actor.TenantId, Actor.UserId, resourceType, resourceId, action, reason,
+            occurredAt ?? Now, metadata);
+        database.AuditLogs.Add(audit);
+        if (resourceType != "work_order" || action == "availability_overridden") return;
+        var order = database.ChangeTracker.Entries<WorkOrder>().Single(entry => entry.Entity.Id == resourceId).Entity;
+        var assignmentChange = metadata?.Changes.TechnicianUserIds;
+        var removed = assignmentChange?.Previous.Except(assignmentChange.Current).ToArray() ?? [];
+        database.WorkOrderEvents.Add(new(audit.Id, Actor.TenantId, resourceId, order.Version, action, audit.OccurredAt, removed));
+        if (assignmentChange is not null)
+        {
+            foreach (var (user, kind) in assignmentChange.Current.Select(user =>
+                (user, assignmentChange.Previous.Contains(user) ? "assignment_updated" : "assigned"))
+                .Concat(removed.Select(user => (user, "unassigned"))))
+                database.InboxNotifications.Add(new(Guid.NewGuid(), Actor.TenantId, user, resourceId, order.Version, kind, audit.OccurredAt));
+        }
+        else if (metadata?.Changes.PrimaryTechnicianUserId?.Current is { } primary)
+            database.InboxNotifications.Add(new(Guid.NewGuid(), Actor.TenantId, primary, resourceId, order.Version, "assignment_updated", audit.OccurredAt));
+    }
 }

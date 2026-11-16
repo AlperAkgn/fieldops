@@ -12,6 +12,7 @@ export type PullPage = {
   cursor: string;
   hasMore: boolean;
   serverTime: string;
+  timeZoneId?: string;
 };
 export type Intent =
   | { kind: 'checklist'; itemId: string; isCompleted: boolean }
@@ -44,6 +45,7 @@ export type OfflineSnapshot = {
   removed: number;
   rebuilding: boolean;
   retryAt: number;
+  timeZoneId?: string | null;
 };
 
 const initial: OfflineSnapshot = {
@@ -219,8 +221,12 @@ export class OfflineStore {
         INSERT INTO sync_state(id) VALUES(1);
         PRAGMA user_version = 1;
       `);
-      else if (schema[0]?.user_version !== 1)
+      else if (schema[0]?.user_version !== 1 && schema[0]?.user_version !== 2)
         throw new Error('Unsupported offline storage version.');
+      if (schema[0]?.user_version !== 2)
+        await this.db.execAsync(
+          'ALTER TABLE sync_state ADD COLUMN timeZoneId TEXT; PRAGMA user_version = 2;',
+        );
       await this.db.runAsync("UPDATE outbox SET state = 'retry' WHERE state = 'sending'");
     });
   }
@@ -242,7 +248,7 @@ export class OfflineStore {
   private async read(): Promise<OfflineSnapshot> {
     const [state] = await this.db.getAllAsync<
       Omit<OfflineSnapshot, 'orders' | 'operations' | 'rebuilding'> & { rebuilding: number }
-    >('SELECT cursor, lastSync, removed, rebuilding, retryAt FROM sync_state');
+    >('SELECT cursor, lastSync, removed, rebuilding, retryAt, timeZoneId FROM sync_state');
     const rows = await this.db.getAllAsync<{ value: string }>(
       'SELECT value FROM offline_orders ORDER BY id',
     );
@@ -321,9 +327,10 @@ export class OfflineStore {
           'DELETE FROM outbox WHERE orderId NOT IN (SELECT id FROM offline_orders)',
         );
         await this.db.runAsync(
-          'UPDATE sync_state SET removed = removed + ?, rebuilding = 0, lastSync = ? WHERE id = 1',
+          'UPDATE sync_state SET removed = removed + ?, rebuilding = 0, lastSync = ?, timeZoneId = coalesce(?, timeZoneId) WHERE id = 1',
           missing[0]?.count ?? 0,
           Math.min(stamp, this.now()),
+          page.timeZoneId ?? null,
         );
       }
       await this.db.runAsync('UPDATE sync_state SET cursor = ? WHERE id = 1', page.cursor);

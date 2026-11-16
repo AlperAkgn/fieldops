@@ -2,29 +2,44 @@ import { useState } from 'react';
 import { Text } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Confirm, ErrorBox, Field, Pill, Screen, styles } from '../components/ui';
-import { message, statusLabel } from '../features/orders';
+import { dateTime, message, statusLabel, todayRange } from '../features/orders';
 import { useOffline } from './runtime';
 import type { Intent, QueueRow } from './store';
 
-export function OfflineOrders() {
+export function OfflineOrders({ today = false }: { today?: boolean }) {
   const { snapshot, busy, error, workspace, offline } = useOffline();
+  const timeZone = snapshot?.timeZoneId ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const range = today ? todayRange(timeZone) : null;
+  const rows =
+    snapshot?.orders.filter(
+      ({ order }) =>
+        !range ||
+        (order.plannedStartAt &&
+          order.plannedEndAt &&
+          Date.parse(order.plannedStartAt) < Date.parse(range.plannedTo) &&
+          Date.parse(order.plannedEndAt) > Date.parse(range.plannedFrom)),
+    ) ?? [];
   return (
     <Screen>
-      <Text style={styles.title}>Downloaded work orders</Text>
+      <Text style={styles.title}>
+        {today ? 'Downloaded schedule for today' : 'Downloaded work orders'}
+      </Text>
       <Pill text={offline ? 'Offline' : 'Synchronizing'} />
       {error && <ErrorBox text={error} />}
       {busy && <Text style={styles.subtitle}>Checking available work orders…</Text>}
-      {!snapshot?.orders.length && (
+      {rows.length === 0 && (
         <Text style={styles.text}>No downloaded work orders are available.</Text>
       )}
-      {snapshot?.orders.map(({ order }) => (
+      {rows.map(({ order }) => (
         <Card key={order.id}>
           <Text style={styles.text}>
             {order.workOrderNumber} · {order.title}
           </Text>
           <Text style={styles.subtitle}>{statusLabel(order.status)}</Text>
           {order.plannedStartAt && (
-            <Text style={styles.subtitle}>{new Date(order.plannedStartAt).toLocaleString()}</Text>
+            <Text style={styles.subtitle}>
+              {dateTime(order.plannedStartAt, timeZone)} · {timeZone}
+            </Text>
           )}
           <Button
             title="Open work order"
@@ -115,6 +130,7 @@ export function OfflineOrder({
       )}
       {entity && (
         <>
+          <Text style={styles.subtitle}>Attachments require a connection.</Text>
           <Card>
             <Text style={styles.text}>
               {entity.order.workOrderNumber} · {statusLabel(entity.order.status)}

@@ -16,9 +16,9 @@ flowchart LR
     Infrastructure --> Application
     Infrastructure --> Domain
     Infrastructure --> DB[(PostgreSQL)]
-    Infrastructure -. Phase 6 .-> Storage[Private S3 / MinIO]
-    Api -. Phase 6 authenticated SignalR .-> Web
-    Api -. Phase 6 authenticated SignalR .-> Mobile
+    Infrastructure --> Storage[Private S3-compatible storage]
+    Api -->|Authenticated SignalR| Web
+    Api -->|Authenticated SignalR| Mobile
 ```
 
 API is the composition root and the single deployable backend. Infrastructure depends inward to implement application contracts. Domain does not reference EF Core, ASP.NET, Identity, or UI libraries. Application does not depend on Infrastructure. No service bus, distributed transaction, generic repository, or mediator framework is needed for the foundation.
@@ -78,7 +78,7 @@ Features are organized under `apps/admin-web/src/pages`, with shared transport/c
 
 The only backend additions are `IReportingReader` in Application, its EF implementation in Infrastructure, and policy-protected read endpoints in API. Domain rules and the Phase 1/2 write transaction boundaries are unchanged. Aggregate reports use PostgreSQL repeatable read so counts and charts describe one committed snapshot. Technician lookup deliberately exposes fewer fields than owner-only membership administration.
 
-The user explicitly included daily/weekly scheduling and bounded operational reports in Phase 3. SignalR, notifications, attachments, drag-and-drop scheduling and richer analytics remain Phase 6.
+Phase 3 delivered daily/weekly scheduling and bounded operational reports. Phase 6 extends those workflows with live refresh, workspace time zones, reschedule proposals and additional metrics.
 
 The Phase 3 quality-gate remediation adds a scoped work-order write coordinator. Parent actions, checklist/comments and scheduling/assignment forms share aggregate pending state and a QueryClient-local write lock. Acknowledged server versions update detail/checklist cache before selective refetch; controls remain pending through reconciliation. Dialogs retain their edit snapshot, and a stale command is rejected rather than upgraded to another actor's version. A user explicitly reloads and retries real conflicts. The backend optimistic-concurrency and transaction contracts are unchanged. Offset-array member/invitation lists use one lookahead record to determine Next without fabricating totals.
 
@@ -87,3 +87,9 @@ The Phase 3 quality-gate remediation adds a scoped work-order write coordinator.
 Expo Router protects sign-in, authenticated tabs and Technician-only work-order routes. A framework-independent `MobileSession` owns serialized credential operations and a native `SecureStore` adapter supplies protected persistence. Access tokens and TanStack Query data stay in memory. Origin-bound refresh records use a crash/interruption marker before rotation; ambiguous outcomes require login rather than credential replay. Identity/workspace/role changes cancel/clear query scope and reject late responses. Native JSON authentication remains separate from the browser cookie/CSRF transport.
 
 `TechnicianApi` uses the existing API DTOs/endpoints and never supplies a tenant authority. The backend revalidates active membership and resource assignment. Every aggregate writer shares pending state and a per-QueryClient lock, acknowledges root/checklist versions, and refetches before enabling subsequent writes. A real conflict retains the edit snapshot/input until explicit reload. Native API/driver details are confined to transport/runtime; screen UI owns only filters, form drafts and confirmation snapshots. No backend, schema, transaction or authorization changes were needed. [Mobile behavior and verification](mobile.md)
+
+## Phase 6 collaboration
+
+Work-order events commit with the corresponding business change and audit. A scoped PostgreSQL dispatcher locks committed rows and publishes minimal SignalR invalidations to active, revalidated connections. Query clients recover through API reads and mobile sync. The connection registry is process-local. Multi-replica fan-out needs a deployment-level backplane or equivalent design before scaling.
+
+Inbox notifications and provider delivery state are durable PostgreSQL records. Expo push on a configured build carries a generic message and opaque notification ID. Private files use a separate attachment lifecycle and an S3-compatible adapter. File bytes stay outside Postgres. [Configuration, verification and limitations](phase-6-results.md)

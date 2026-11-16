@@ -46,6 +46,52 @@ const command = (version: number) => ({
   body: { expectedVersion: version, isCompleted: true },
 });
 describe('work order write coordination', () => {
+  it('distinguishes a background detail read from an aggregate write', async () => {
+    let publishVersion: (version: number) => void = () => undefined;
+    const detail = new Promise<number>((resolve) => {
+      publishVersion = resolve;
+    });
+    const f = fixture(() => detail);
+    let refresh: Promise<void>;
+    await act(async () => {
+      refresh = f.client.invalidateQueries({ queryKey: key });
+    });
+    await waitFor(() => expect(f.result.current.state.busy).toBe(true));
+    expect(f.result.current.state.writing).toBe(false);
+    expect(f.result.current.a.writing).toBe(false);
+    expect(mocks.api).not.toHaveBeenCalled();
+    await act(async () => {
+      publishVersion(5);
+      await refresh!;
+    });
+    await waitFor(() => expect(f.result.current.state.busy).toBe(false));
+    expect(f.version()).toBe(5);
+  });
+
+  it('saves the edited version during a background read without applying its late result', async () => {
+    let finishOldRead: (version: number) => void = () => undefined;
+    const oldRead = new Promise<number>((resolve) => {
+      finishOldRead = resolve;
+    });
+    let reads = 0;
+    const f = fixture(() => (++reads === 1 ? oldRead : Promise.resolve(5)));
+    mocks.api.mockResolvedValueOnce({ workOrderVersion: 5 });
+    await act(async () => {
+      void f.client.invalidateQueries({ queryKey: key });
+    });
+    await waitFor(() => expect(f.result.current.state.busy).toBe(true));
+    await act(async () => {
+      await f.result.current.a.mutateAsync(command(4));
+      finishOldRead(4);
+    });
+    expect(reads).toBe(2);
+    expect(f.version()).toBe(5);
+    expect(mocks.api).toHaveBeenCalledExactlyOnceWith(command(4).path, {
+      method: 'PATCH',
+      body: command(4).body,
+    });
+  });
+
   it('uses acknowledged versions for consecutive checklist writes', async () => {
     mocks.api
       .mockResolvedValueOnce({ workOrderVersion: 5 })
@@ -80,6 +126,7 @@ describe('work order write coordination', () => {
       });
     });
     expect(f.result.current.state.busy).toBe(true);
+    expect(f.result.current.state.writing).toBe(true);
     await act(async () => {
       finish({ workOrderVersion: 5 });
       await first!;

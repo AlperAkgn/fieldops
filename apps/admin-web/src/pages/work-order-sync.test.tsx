@@ -72,6 +72,7 @@ it('blocks Start until checklist acknowledgement and detail refetch synchronize 
           };
         });
       }
+      if (path.endsWith('/attachments')) return [];
       if (path.endsWith('/checklist'))
         return {
           workOrderId: 'order',

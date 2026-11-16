@@ -1093,6 +1093,144 @@ namespace FieldOps.Infrastructure.Persistence.Migrations
                     b.ToTable("AspNetUsers", (string)null);
                 });
 
+            modelBuilder.Entity("FieldOps.Infrastructure.Persistence.InboxNotification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset?>("ReadAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("WorkOrderId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "WorkOrderId");
+
+                    b.HasIndex("TenantId", "UserId", "CreatedAt");
+
+                    b.HasIndex("TenantId", "UserId", "WorkOrderId", "Version", "Kind")
+                        .IsUnique();
+
+                    b.ToTable("InboxNotifications");
+                });
+
+            modelBuilder.Entity("FieldOps.Infrastructure.Persistence.PushDelivery", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("DueAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("NotificationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Outcome")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TicketId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DueAt")
+                        .HasFilter("\"CompletedAt\" IS NULL");
+
+                    b.HasIndex("TenantId", "DeviceId", "SessionId");
+
+                    b.HasIndex("TenantId", "NotificationId", "DeviceId", "SessionId")
+                        .IsUnique();
+
+                    b.ToTable("PushDeliveries");
+                });
+
+            modelBuilder.Entity("FieldOps.Infrastructure.Persistence.PushDevice", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ProtectedToken")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("TenantId", "DeviceId", "SessionId");
+
+                    b.HasIndex("SessionId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasFilter("\"RevokedAt\" IS NULL");
+
+                    b.HasIndex("TenantId", "UserId");
+
+                    b.ToTable("PushDevices");
+                });
+
             modelBuilder.Entity("FieldOps.Infrastructure.Persistence.SyncReceipt", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -1158,6 +1296,103 @@ namespace FieldOps.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("SyncWorkOrderChanges", (string)null);
+                });
+
+            modelBuilder.Entity("FieldOps.Infrastructure.Persistence.WorkOrderAttachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("Hash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Ready")
+                        .HasColumnType("boolean");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UploaderId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("WorkOrderId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt")
+                        .HasFilter("\"Ready\" = false");
+
+                    b.HasIndex("TenantId", "UploaderId");
+
+                    b.HasIndex("TenantId", "WorkOrderId", "CreatedAt");
+
+                    b.HasIndex("TenantId", "WorkOrderId", "UploaderId", "OperationId")
+                        .IsUnique();
+
+                    b.ToTable("WorkOrderAttachments");
+                });
+
+            modelBuilder.Entity("FieldOps.Infrastructure.Persistence.WorkOrderEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("DispatchedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.PrimitiveCollection<Guid[]>("FormerAssignees")
+                        .IsRequired()
+                        .HasColumnType("uuid[]");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("WorkOrderId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt", "Id")
+                        .HasFilter("\"DispatchedAt\" IS NULL");
+
+                    b.HasIndex("TenantId", "WorkOrderId", "Version");
+
+                    b.ToTable("WorkOrderEvents");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserClaim<System.Guid>", b =>
@@ -1490,6 +1725,55 @@ namespace FieldOps.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("FieldOps.Infrastructure.Persistence.InboxNotification", b =>
+                {
+                    b.HasOne("FieldOps.Domain.Organizations.OrganizationMembership", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "UserId")
+                        .HasPrincipalKey("TenantId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FieldOps.Domain.WorkOrders.WorkOrder", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "WorkOrderId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FieldOps.Infrastructure.Persistence.PushDelivery", b =>
+                {
+                    b.HasOne("FieldOps.Infrastructure.Persistence.InboxNotification", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "NotificationId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("FieldOps.Infrastructure.Persistence.PushDevice", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "DeviceId", "SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FieldOps.Infrastructure.Persistence.PushDevice", b =>
+                {
+                    b.HasOne("FieldOps.Domain.Identity.AuthSession", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("FieldOps.Domain.Organizations.OrganizationMembership", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "UserId")
+                        .HasPrincipalKey("TenantId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("FieldOps.Infrastructure.Persistence.SyncReceipt", b =>
                 {
                     b.HasOne("FieldOps.Domain.Organizations.OrganizationMembership", null)
@@ -1523,6 +1807,33 @@ namespace FieldOps.Infrastructure.Persistence.Migrations
                         .HasForeignKey("TenantId", "WorkOrderId")
                         .HasPrincipalKey("TenantId", "Id")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FieldOps.Infrastructure.Persistence.WorkOrderAttachment", b =>
+                {
+                    b.HasOne("FieldOps.Domain.Organizations.OrganizationMembership", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "UploaderId")
+                        .HasPrincipalKey("TenantId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FieldOps.Domain.WorkOrders.WorkOrder", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "WorkOrderId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("FieldOps.Infrastructure.Persistence.WorkOrderEvent", b =>
+                {
+                    b.HasOne("FieldOps.Domain.WorkOrders.WorkOrder", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "WorkOrderId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

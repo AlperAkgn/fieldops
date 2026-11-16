@@ -1,10 +1,10 @@
 # Implementation status
 
-Last updated: 2026-11-12 (Europe/Istanbul).
+Last updated: 2026-11-16 (Europe/Istanbul).
 
 ## Authorization boundary
 
-**Phases 0–3 are complete. Phase 4 online and Phase 5 offline implementations are available.** Phase 4 Android native validation is `DEFERRED / NOT VERIFIED` by owner decision. Phase 5 development was explicitly authorized with this gate deferred. Final mobile acceptance remains conditional on the physical-device runs. [Android validation handoff](phase-4-android-validation.md) · [Phase 5 report](phase-5-results.md)
+**Phases 0–3 are complete. Phases 4–6 have completed implementation and automated verification.** Physical Android/iOS validation for Phases 4–6 is `DEFERRED / NOT VERIFIED` until the development phases are complete. [Android validation handoff](phase-4-android-validation.md) · [Phase 6 report](phase-6-results.md)
 
 ## Phase 0 revalidation (historical)
 
@@ -27,9 +27,9 @@ The revalidation superseded the historical first-run table below. The audit reco
 | 1 | Complete | Identity and multi-tenancy |
 | 2 | Complete | Core domain and API |
 | 3 | Complete; final focus fix verified | Successful-save dialog focus restoration corrected |
-| 4 | Not Started | Technician mobile workflows |
-| 5 | Not Started | Offline-first synchronization |
-| 6 | Not Started | Real-time, notifications, attachments, scheduling, analytics |
+| 4 | Implemented, native validation deferred | Technician mobile workflows |
+| 5 | Implemented, native validation deferred | Offline-first synchronization |
+| 6 | Complete, native validation deferred | Real-time, notifications, attachments, scheduling, analytics |
 | 7 | Not Started | Quality and hardening |
 | 8 | Not Started | Portfolio and release preparation |
 
@@ -232,16 +232,19 @@ Phase 3 was subsequently authorized and implemented against these APIs. [Phase 2
 - Completed: scoped SQLite cache and ordered outbox, connection and lifecycle integration, retry/backoff, technician sync endpoints, transactional receipts and committed-order cursors, resnapshot-based removal, version conflicts and interactive Sync center. Supports downloaded assignments, checklist changes, service notes and technician lifecycle commands. The local lease is 24 hours. The server replay/cursor window is seven days and receipts are retained without pruning. [Offline protocol and limits](offline-sync.md)
 - Database: migration `20261113203829_OfflineSynchronization` was applied in isolated PostgreSQL environments. The default development database and existing Docker volumes were preserved.
 - Verification: Release build and .NET format passed. **232 backend tests** (92 unit, 140 PostgreSQL), **64 mobile Vitest + 14 React Native component + 8 HTTPS API/PostgreSQL integration tests**, **58 web tests + 12 Edge Playwright scenarios** passed. Strict checks, Expo compatibility, Android/iOS JavaScript export, Metro smoke, SQLCipher config introspection and Compose HTTPS readiness passed.
-- Pending native acceptance: `DEFERRED / NOT VERIFIED`. Runtime cipher, physical encryption/backup, process restart, radio transitions, workspace/logout/revocation cleanup and interaction accessibility require the new native binary on a supported device.
-- Next steps: **READY for independent Quality Gate**. **Phase 6 readiness: CONDITIONAL** on the outstanding physical-device runs for final mobile acceptance. Phase 6 remains a separate authorization. [Verification and readiness](phase-5-results.md#9-regression-results)
+- Pending native acceptance: `DEFERRED / NOT VERIFIED` until the development phases are complete. Runtime cipher, physical encryption/backup, process restart, radio transitions, workspace/logout/revocation cleanup and interaction accessibility require the new native binary on a supported device.
+- The owner explicitly authorized Phase 6 with this acceptance gate deferred. [Phase 5 verification](phase-5-results.md#9-regression-results)
 
 ## Phase 6 — Advanced features
 
-- Completed: local MinIO infrastructure; basic daily/weekly calendar, conflict/audit UI and bounded reports were explicitly delivered in Phase 3. The Phase 6 milestone itself has not started.
-- Pending: tenant/resource-scoped SignalR, transactional delivery, in-app/push notifications/device lifecycle, safe attachments/camera/gallery, richer scheduling/drag-and-drop and deeper analytics.
-- Blockers: core workflows, separate authorization, maintained storage reassessment and native push credentials for delivery acceptance.
-- Verification: not run. Plan recipient isolation/retries, safe upload/download, concurrent/DST schedule conflicts and database-backed statistics.
-- Next steps: reassess storage and implement each feature with its real client workflow.
+- Implemented: authenticated SignalR invalidations and committed event delivery, in-app notifications and Expo device lifecycle, private S3-compatible work-order attachments, workspace-zone scheduling with technician filters and date-move proposals, and measured execution/overlap reporting. The Phase 5 outbox and replay protocol stay available.
+- Recovered unsent push retries after device-token rotation and protected the replacement token from late receipts. Added Expo response contract cases and verified cleanup of a stored object whose upload did not commit. The existing Phase 6 migration is sufficient.
+- Remediated all five independent quality-gate findings. SignalR refreshes collaboration queries, rejected push tickets can safely resend the same notification, mobile registration retains the latest rotation, stored attachments can be viewed, and upcoming work follows workspace calendar days across DST. [Phase 6 quality-gate remediation](phase-6-quality-gate-remediation.md)
+- That re-audit confirmed M1–M5 and found a separate Edit focus regression. The fix separates the Edit trigger's write lock from background reads, restores focus after React commits, and honors fallback and user focus changes. The final web run passed Linux lint, strict typecheck, format, production build, 61 Vitest cases and all 16 Edge Playwright scenarios with the real PostgreSQL-backed API and SignalR. [Final focus fix](phase-6-final-focus-fix.md)
+- The follow-up audit confirmed the focus fix and found a dropped Save click. Edit Save and Apply checklist now use the aggregate write lock during submission. The final web verification passed Linux lint, strict typecheck, formatting, production build, 62 Vitest cases and two separate 17/17 Playwright runs against the isolated HTTPS/PostgreSQL/SignalR stack. [Final Save stability fix](phase-6-final-save-stability-fix.md)
+- Earlier Phase 6 verification passed the Release build with zero warnings/errors, 249 backend tests (92 unit, 157 integration, zero skips), 16 focused collaboration/provider cases and EF model match. The isolated HTTPS/PostgreSQL/Mailpit/MinIO stack passed health, private-bucket and migration checks. Mobile passed 70 Vitest, 25 Jest and 10 real API integration tests. A clean Linux install, Expo compatibility, Android/iOS JavaScript exports and Metro smoke passed.
+- Native acceptance: `DEFERRED / NOT VERIFIED`, including camera/gallery, PDF handoff, platform notification delivery and actual push receipts. Hosted CI and production push/storage acceptance remain unverified.
+- **FOCUS REGRESSION: RESOLVED. SAVE REGRESSION: RESOLVED. WEB REGRESSION: PASS. INDEPENDENT RE-AUDIT READINESS: READY. PHASE 7 READINESS: CONDITIONAL.** The targeted Save re-audit and phase authorization are pending.
 
 ## Phase 7 — Quality and hardening
 

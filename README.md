@@ -55,7 +55,7 @@ flowchart LR
     API --> Infrastructure[FieldOps.Infrastructure]
     Infrastructure --> Application
     Infrastructure --> PostgreSQL[(PostgreSQL)]
-    Infrastructure -. Phase 6 .-> Storage[S3-compatible storage]
+    Infrastructure --> Storage[Private S3-compatible storage]
 ```
 
 The backend is a modular monolith. Domain owns organization and session rules. Application defines use-case contracts. Infrastructure implements Identity, persistence, and mail delivery. API composes authentication, policies, and HTTP endpoints. [Architecture](docs/architecture.md)

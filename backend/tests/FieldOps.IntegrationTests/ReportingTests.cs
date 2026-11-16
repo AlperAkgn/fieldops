@@ -27,9 +27,31 @@ public sealed class ReportingTests : CoreOperationsTestBase
         Assert.Equal(1, report["activeTechnicians"]!.GetValue<int>());
         Assert.Equal(33.3m, report["completionRate"]!.GetValue<decimal>());
         Assert.Equal(1, report["technicianWorkload"]![0]!["activeOrders"]!.GetValue<int>());
+        Assert.Equal(1, report["execution"]!["measuredCompletions"]!.GetValue<int>());
+        Assert.True(report["execution"]!["averageMinutes"]!.GetValue<decimal>() >= 0);
+        Assert.Equal(0, report["execution"]!["overlappingAssignments"]!.GetValue<int>());
         Assert.Equal("Upcoming inspection", report["upcomingOrders"]![0]!["title"]!.GetValue<string>());
         var beforeFirst = await CallAsync(HttpMethod.Get, "/reports/work-orders?to=" + Uri.EscapeDataString(first["createdAt"]!.GetValue<string>()), owner.Tokens);
         Assert.Equal(0, beforeFirst["totalOrders"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task OverlapMetricsDistinguishAdjacentAndOverlappingDstInstants()
+    {
+        var owner = await RegisterAsync();
+        var technician = await JoinAsync(owner, await RegisterAsync(), OrganizationRole.Technician);
+        var catalog = await CatalogAsync(owner.Tokens);
+        var first = await ScheduleAsync(owner.Tokens, await OrderAsync(owner.Tokens, catalog),
+            "2027-11-07T01:00:00-04:00", "2027-11-07T01:00:00-05:00");
+        await AssignAsync(owner.Tokens, first, technician.UserId);
+        var second = await ScheduleAsync(owner.Tokens, await OrderAsync(owner.Tokens, catalog),
+            "2027-11-07T01:00:00-05:00", "2027-11-07T02:00:00-05:00");
+        await AssignAsync(owner.Tokens, second, technician.UserId);
+        Assert.Equal(0, (await CallAsync(HttpMethod.Get, "/reports/work-orders", owner.Tokens))["execution"]!["overlappingAssignments"]!.GetValue<int>());
+        var overlap = await ScheduleAsync(owner.Tokens, await OrderAsync(owner.Tokens, catalog),
+            "2027-11-07T01:30:00-04:00", "2027-11-07T01:30:00-05:00");
+        await AssignAsync(owner.Tokens, overlap, technician.UserId, "Documented DST exception");
+        Assert.Equal(3, (await CallAsync(HttpMethod.Get, "/reports/work-orders", owner.Tokens))["execution"]!["overlappingAssignments"]!.GetValue<int>());
     }
 
     [Fact]

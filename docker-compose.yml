@@ -51,6 +51,11 @@ services:
       Email__Port: 1025
       Email__FromAddress: noreply@fieldops.test
       Email__UseStartTls: 'false'
+      ObjectStorage__Endpoint: http://minio:9000
+      ObjectStorage__Bucket: fieldops-private
+      ObjectStorage__AccessKey: ${MINIO_ROOT_USER:-fieldops_local}
+      ObjectStorage__SecretKey: ${MINIO_ROOT_PASSWORD:?Copy .env.example to .env and set MINIO_ROOT_PASSWORD}
+      ObjectStorage__CreateLocalBucket: 'true'
     volumes:
       - api_keys:/keys
       - type: bind

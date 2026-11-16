@@ -9,10 +9,11 @@ public sealed record DistributionDto(string Name, int Count);
 public sealed record WorkloadDto(Guid UserId, string DisplayName, int ActiveOrders);
 public sealed record UpcomingOrderDto(Guid Id, string WorkOrderNumber, string Title, string Status, DateTimeOffset? PlannedStartAt);
 public sealed record ActivityDto(Guid Id, string ResourceType, Guid ResourceId, string Action, DateTimeOffset OccurredAt);
+public sealed record ExecutionMetrics(int MeasuredCompletions, decimal? AverageMinutes, int OverlappingAssignments);
 public sealed record OperationsReportDto(int TotalOrders, int ActiveOrders, int CompletedOrders, int OverdueOrders,
     int ActiveTechnicians, decimal CompletionRate, IReadOnlyList<DistributionDto> StatusDistribution,
     IReadOnlyList<DistributionDto> PriorityDistribution, IReadOnlyList<WorkloadDto> TechnicianWorkload,
-    IReadOnlyList<UpcomingOrderDto> UpcomingOrders, IReadOnlyList<ActivityDto> RecentActivities);
+    IReadOnlyList<UpcomingOrderDto> UpcomingOrders, IReadOnlyList<ActivityDto> RecentActivities, ExecutionMetrics Execution);
 
 public interface IReportingReader
 {

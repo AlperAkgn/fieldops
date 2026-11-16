@@ -1,4 +1,11 @@
-import { test, expect, request, type APIRequestContext, type Page } from '@playwright/test';
+import {
+  test,
+  expect,
+  request,
+  type APIRequestContext,
+  type Page,
+  type WebSocketRoute,
+} from '@playwright/test';
 const apiOrigin = process.env.FIELDOPS_E2E_API || 'https://localhost:5443';
 const mailOrigin = process.env.FIELDOPS_E2E_MAIL || 'http://localhost:8039';
 const password = 'Browser-Test-Password-42!';
@@ -79,6 +86,65 @@ async function signIn(page: Page, email: string, organization?: string) {
   }
   await expect(page.locator('main#main h1')).toBeVisible();
 }
+
+async function controlOrderEvents(page: Page) {
+  let connected = false;
+  const gates = new Map<string, { forward?: () => void }>();
+  await page.routeWebSocket('**/api/v1/live?*', (socket) => {
+    socket.connectToServer().onMessage((message) => {
+      for (const frame of message.toString().split('\u001e').filter(Boolean)) {
+        const received = JSON.parse(frame) as {
+          target?: string;
+          arguments?: { workOrderId: string; version: number }[];
+        };
+        const change = received.target === 'OrderChanged' ? received.arguments?.[0] : undefined;
+        const gate = change && gates.get(`${change.workOrderId}:${change.version}`);
+        const forward = () => socket.send(`${frame}\u001e`);
+        if (gate) gate.forward = forward;
+        else forward();
+        if (frame === '{}') connected = true;
+      }
+    });
+  });
+  return {
+    ready: () => expect.poll(() => connected).toBe(true),
+    hold(order: { id: string; version: number }, version = order.version + 1) {
+      const key = `${order.id}:${version}`;
+      const gate: { forward?: () => void } = {};
+      gates.set(key, gate);
+      return async () => {
+        await expect
+          .poll(() => !!gate.forward, { message: `Committed order event v${version}` })
+          .toBe(true);
+        gates.delete(key);
+        gate.forward!();
+      };
+    },
+  };
+}
+
+async function controlDetailResponses(page: Page, path: string) {
+  let paused: Promise<void> | undefined;
+  await page.route(
+    (url) => url.pathname === `/api/v1${path}`,
+    async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      const response = await route.fetch();
+      await paused;
+      await route.fulfill({ response });
+    },
+  );
+  return () => {
+    let resume: () => void = () => undefined;
+    paused = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    return () => {
+      paused = undefined;
+      resume();
+    };
+  };
+}
 test.beforeAll(async () => {
   setup = await request.newContext({ ignoreHTTPSErrors: true });
   accounts = {
@@ -117,6 +183,167 @@ test.beforeEach(async ({ browserName }, info) => {
 });
 test.afterAll(async () => setup.dispose());
 
+test('the open work order refreshes collaboration queries on live changes and reconnect', async ({
+  page,
+}) => {
+  let live: WebSocketRoute | undefined;
+  let disconnected = false;
+  let connections = 0;
+  await page.routeWebSocket('**/api/v1/live?*', (socket) => {
+    if (disconnected) {
+      void socket.close({ code: 1012 });
+      return;
+    }
+    socket.connectToServer();
+    live = socket;
+    connections++;
+  });
+  const source = (await call('/work-orders?pageSize=1', undefined, owner, 'GET')).items[0];
+  const order = await call(
+    '/work-orders',
+    {
+      customerId: source.customerId,
+      serviceLocationId: source.serviceLocationId,
+      title: 'Live collaboration regression',
+      priority: 'Medium',
+    },
+    owner,
+  );
+  const path = `/work-orders/${order.id}`;
+  const template = await call('/checklist-templates', { name: 'Live checklist' }, owner);
+  await call(
+    `/checklist-templates/${template.id}/items`,
+    {
+      expectedVersion: template.version,
+      label: 'Inspect the live item',
+      position: 0,
+      isRequired: true,
+    },
+    owner,
+  );
+  await signIn(page, manager.email, owner.tenantId);
+  const signInConnections = connections;
+  const catchup = page.waitForResponse(
+    (response) => response.url().includes(`${path}/comments?`) && response.ok(),
+  );
+  await page.goto(path);
+  await catchup;
+  await expect.poll(() => connections).toBeGreaterThan(signInConnections);
+  await expect(page.getByText('No activity yet')).toBeVisible();
+  await call(
+    `${path}/comments`,
+    {
+      expectedVersion: order.version,
+      body: 'Committed by the separate owner session',
+      visibility: 'TechnicianVisible',
+    },
+    owner,
+  );
+  await expect(page.getByText('Committed by the separate owner session')).toBeVisible();
+
+  let current = (await call(path, undefined, owner, 'GET')).order;
+  const checklist = await call(
+    `${path}/checklist/apply`,
+    { expectedVersion: current.version, templateId: template.id },
+    owner,
+  );
+  const checkbox = page.getByRole('checkbox', { name: /Inspect the live item/ });
+  await expect(checkbox).toBeVisible();
+  await page.getByRole('tab', { name: 'Audit history' }).click();
+  const before = await call(
+    `/audit-logs?resourceType=work_order&resourceId=${order.id}`,
+    undefined,
+    owner,
+    'GET',
+  );
+  await expect(page.getByRole('tabpanel').locator('article')).toHaveCount(before.totalCount);
+  await call(
+    `${path}/checklist/${checklist.items[0].id}`,
+    {
+      expectedVersion: checklist.workOrderVersion,
+      isCompleted: true,
+    },
+    owner,
+    'PATCH',
+  );
+  await expect(checkbox).toBeChecked();
+  await expect(page.getByRole('tabpanel').locator('article')).toHaveCount(before.totalCount + 1);
+
+  await page.getByRole('tab', { name: 'Status history' }).click();
+  await expect(page.getByRole('tabpanel').locator('article')).toHaveCount(1);
+  const observer = await page.context().newPage();
+  await observer.goto(path);
+  await expect(observer.locator('.page-header .badge')).toHaveText('Draft');
+  disconnected = true;
+  const previousConnections = connections;
+  await live!.close({ code: 1012 });
+  current = (await call(path, undefined, owner, 'GET')).order;
+  await call(
+    `${path}/schedule`,
+    {
+      expectedVersion: current.version,
+      plannedStartAt: '2027-01-15T10:00:00Z',
+      plannedEndAt: '2027-01-15T11:00:00Z',
+    },
+    owner,
+  );
+  await expect(observer.locator('.page-header .badge')).toHaveText('Scheduled');
+  await observer.close();
+  await expect(page.getByRole('tabpanel').locator('article')).toHaveCount(1);
+  disconnected = false;
+  await expect.poll(() => connections).toBeGreaterThan(previousConnections);
+  await expect(page.getByRole('tabpanel').locator('article')).toHaveCount(2);
+  await expect(
+    page.getByRole('tabpanel').getByText('Draft → Scheduled', { exact: true }),
+  ).toBeVisible();
+});
+
+test('committed work order updates refresh automatically and private attachments round trip', async ({
+  page,
+}) => {
+  const listing = await call('/work-orders?pageSize=1', undefined, owner, 'GET');
+  const source = listing.items[0];
+  const order = await call(
+    '/work-orders',
+    {
+      customerId: source.customerId,
+      serviceLocationId: source.serviceLocationId,
+      title: 'Realtime draft',
+      priority: 'Medium',
+    },
+    owner,
+  );
+  await signIn(page, accounts.owner!.email, owner.tenantId);
+  const socket = page.waitForEvent('websocket', (event) => event.url().includes('/api/v1/live'));
+  await page.goto(`/work-orders/${order.id}`);
+  await expect(page.getByRole('heading', { name: order.title, exact: true })).toBeVisible();
+  await socket;
+  const title = `Live field update ${suffix}`;
+  await call(`/work-orders/${order.id}`, { title, expectedVersion: order.version }, owner, 'PATCH');
+  await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
+
+  const image = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=',
+    'base64',
+  );
+  await page
+    .getByLabel('Choose attachment')
+    .setInputFiles({ name: 'site.png', mimeType: 'image/png', buffer: image });
+  await page.getByRole('button', { name: 'Upload attachment' }).click();
+  await expect(page.getByRole('button', { name: 'Preview' })).toBeVisible();
+  await page.getByRole('button', { name: 'Preview' }).click();
+  await expect(page.getByRole('img', { name: 'site.png' })).toBeVisible();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download' }).click();
+  expect((await download).suggestedFilename()).toBe('site.png');
+  const files = await call(`/work-orders/${order.id}/attachments`, undefined, owner, 'GET');
+  expect(files).toHaveLength(1);
+  const unsigned = await setup.get(
+    `${apiOrigin}/api/v1/work-orders/${order.id}/attachments/${files[0].id}`,
+  );
+  expect(unsigned.status()).toBe(401);
+});
+
 test('work order edit restores focus after successful save, pending writes and errors', async ({
   page,
 }) => {
@@ -134,7 +361,10 @@ test('work order edit restores focus after successful save, pending writes and e
   );
   const path = `/work-orders/${order.id}`;
   await signIn(page, manager.email, owner.tenantId);
+  const live = await controlOrderEvents(page);
+  const pauseReads = await controlDetailResponses(page, path);
   await page.goto(path);
+  await live.ready();
   const edit = page.getByRole('button', { name: 'Edit work order', exact: true });
   const modal = page.getByRole('dialog', { name: 'Edit work order', exact: true });
   await edit.click();
@@ -197,22 +427,30 @@ test('work order edit restores focus after successful save, pending writes and e
   await edit.click();
   await modal.getByLabel(/^Title/).fill('Unsaved input must survive');
   order = await call(path, undefined, owner, 'GET');
-  await call(
-    path,
-    { expectedVersion: order.order.version, description: 'Updated by another actor' },
-    owner,
-    'PATCH',
-  );
-  const failed = page.waitForResponse(
-    (response) => response.url().endsWith(path) && response.request().method() === 'PATCH',
-  );
-  await submit.click();
-  expect((await failed).status()).toBe(409);
-  await expect(modal.getByRole('alert')).toBeVisible();
-  await expect(modal.getByLabel(/^Title/)).toHaveValue('Unsaved input must survive');
-  await expect(modal).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(edit).toBeFocused();
+  // Keep the newer version out of the browser until the unchanged draft reaches the real API.
+  const releaseConflict = live.hold(order.order);
+  const resumeReads = pauseReads();
+  try {
+    await call(
+      path,
+      { expectedVersion: order.order.version, description: 'Updated by another actor' },
+      owner,
+      'PATCH',
+    );
+    const failed = page.waitForResponse(
+      (response) => response.url().endsWith(path) && response.request().method() === 'PATCH',
+    );
+    await submit.click();
+    expect((await failed).status()).toBe(409);
+    await expect(modal.getByRole('alert')).toBeVisible();
+    await expect(modal.getByLabel(/^Title/)).toHaveValue('Unsaved input must survive');
+    await expect(modal).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(edit).toBeFocused();
+    await releaseConflict();
+  } finally {
+    resumeReads();
+  }
 
   // Completing the order actually unmounts its trigger: focus must reach the main landmark.
   order = (await call(path, undefined, owner, 'GET')).order;
@@ -244,6 +482,299 @@ test('work order edit restores focus after successful save, pending writes and e
   await expect(complete).toHaveCount(0);
   await expect(page.locator('main#main')).toBeFocused();
   await expect(page.locator('.page-header .badge')).toHaveText('Completed');
+});
+
+for (const conflict of [false, true]) {
+  test(`Edit retains focus during a live detail read${conflict ? ' after a real conflict and Escape' : ''}`, async ({
+    page,
+  }) => {
+    const source = (await call('/work-orders?pageSize=1', undefined, owner, 'GET')).items[0];
+    const order = await call(
+      '/work-orders',
+      {
+        customerId: source.customerId,
+        serviceLocationId: source.serviceLocationId,
+        title: 'Live focus regression',
+        priority: 'Medium',
+      },
+      owner,
+    );
+    const path = `/work-orders/${order.id}`;
+    const changedTitle = 'Updated by the independent owner session';
+    let started = false;
+    let forwardChange: (() => void) | undefined;
+    await signIn(page, manager.email, owner.tenantId);
+    const pauseReads = conflict ? await controlDetailResponses(page, path) : undefined;
+    await page.routeWebSocket('**/api/v1/live?*', (socket) => {
+      socket.connectToServer().onMessage((message) => {
+        const frame = message.toString();
+        if (
+          frame.includes('"target":"OrderChanged"') &&
+          frame.includes(order.id) &&
+          frame.includes(`"version":${order.version + 1}`)
+        ) {
+          forwardChange = () => socket.send(message);
+          return;
+        }
+        socket.send(message);
+        if (frame === '{}\u001e') started = true;
+      });
+    });
+    await page.goto(path);
+    await expect.poll(() => started).toBe(true);
+    const edit = page.getByRole('button', { name: 'Edit work order', exact: true });
+    const modal = page.getByRole('dialog', { name: 'Edit work order', exact: true });
+    await expect(edit).toBeEnabled();
+    await edit.focus();
+    if (conflict) {
+      await page.keyboard.press('Enter');
+      await modal.getByLabel(/^Title/).fill('Unsaved technician visit update');
+    }
+    let updatedVersion: number;
+    const resumeReads = pauseReads?.();
+    try {
+      const updated = await call(
+        path,
+        { expectedVersion: order.version, title: changedTitle },
+        owner,
+        'PATCH',
+      );
+      updatedVersion = updated.version;
+      await expect.poll(() => !!forwardChange).toBe(true);
+      if (conflict) {
+        const rejected = page.waitForResponse(
+          (response) => response.url().endsWith(path) && response.request().method() === 'PATCH',
+        );
+        await modal.getByRole('button', { name: 'Save changes', exact: true }).click();
+        expect((await rejected).status()).toBe(409);
+        await expect(modal.getByRole('alert')).toBeVisible();
+        await expect(modal.getByLabel(/^Title/)).toHaveValue('Unsaved technician visit update');
+        await page.keyboard.press('Escape');
+        await expect(modal).toHaveCount(0);
+      }
+    } finally {
+      resumeReads?.();
+    }
+    await expect(edit).toBeFocused();
+
+    // Proxy the real read and hold its response until the browser observes the pending GET.
+    let releaseRead: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    let responseStatus = 0;
+    const routePath = `**/api/v1${path}`;
+    await page.route(routePath, async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const response = await route.fetch();
+      responseStatus = response.status();
+      await gate;
+      await route.fulfill({ response });
+    });
+    try {
+      forwardChange!();
+      await expect.poll(() => responseStatus).toBe(200);
+      expect(
+        await edit.evaluate((button) => ({
+          editFocused: document.activeElement === button,
+          bodyFocused: document.activeElement === document.body,
+        })),
+      ).toEqual({ editFocused: true, bodyFocused: false });
+      expect(await edit.isEnabled()).toBe(true);
+      if (!conflict) {
+        await page.keyboard.press('Enter');
+        await expect(modal.getByLabel(/^Title/)).toBeEnabled();
+        await expect(
+          modal.getByRole('button', { name: 'Save changes', exact: true }),
+        ).toBeEnabled();
+        await page.keyboard.press('Escape');
+        await expect(modal).toHaveCount(0);
+        await expect(edit).toBeFocused();
+      }
+    } finally {
+      releaseRead();
+      await page.unrouteAll({ behavior: 'wait' });
+    }
+    await expect(page.getByRole('heading', { name: changedTitle, exact: true })).toBeVisible();
+    await expect(edit).toBeFocused();
+    if (conflict) {
+      await call(
+        `${path}/cancel`,
+        { expectedVersion: updatedVersion, reason: 'Focus regression cleanup' },
+        owner,
+      );
+      await expect(edit).toHaveCount(0);
+      await expect(page.locator('main#main')).toBeFocused();
+    } else {
+      let releaseWrite: () => void = () => undefined;
+      const writeGate = new Promise<void>((resolve) => {
+        releaseWrite = resolve;
+      });
+      let written = 0;
+      await page.route(routePath, async (route) => {
+        if (route.request().method() !== 'PATCH') return route.continue();
+        const response = await route.fetch();
+        written = response.status();
+        await writeGate;
+        await route.fulfill({ response });
+      });
+      try {
+        await page.keyboard.press('Enter');
+        await modal.getByLabel(/^Title/).fill('Saved while keyboard focus moved on');
+        await modal.getByRole('button', { name: 'Save changes', exact: true }).click();
+        await expect.poll(() => written).toBe(200);
+        await expect(edit).toBeDisabled();
+        await page.keyboard.press('Escape');
+        await expect(modal).toHaveCount(0);
+        await expect(page.locator('main#main')).toBeFocused();
+        await page.keyboard.press('Tab');
+        const back = page.getByRole('link', { name: 'All work orders', exact: true });
+        await expect(back).toBeFocused();
+        releaseWrite();
+        await expect(edit).toBeEnabled();
+        await expect(
+          page.getByRole('heading', { name: 'Saved while keyboard focus moved on' }),
+        ).toBeVisible();
+        await expect(back).toBeFocused();
+      } finally {
+        releaseWrite();
+        await page.unrouteAll({ behavior: 'wait' });
+      }
+    }
+  });
+}
+
+test('Save submits once when live updates arrive before, during and after the write', async ({
+  page,
+}) => {
+  const source = (await call('/work-orders?pageSize=1', undefined, owner, 'GET')).items[0];
+  const draft = (title: string) =>
+    call(
+      '/work-orders',
+      {
+        customerId: source.customerId,
+        serviceLocationId: source.serviceLocationId,
+        title,
+        priority: 'Medium',
+      },
+      owner,
+    );
+  const order = await draft('Live save regression');
+  const other = await draft('Independent order for background refetch');
+  const path = `/work-orders/${order.id}`;
+  await signIn(page, manager.email, owner.tenantId);
+  const live = await controlOrderEvents(page);
+  await page.goto(path);
+  await live.ready();
+  const edit = page.getByRole('button', { name: 'Edit work order', exact: true });
+  const modal = page.getByRole('dialog', { name: 'Edit work order', exact: true });
+  await edit.click();
+  await modal.getByLabel(/^Title/).fill('Saved through live refetch');
+  const submit = modal.locator('button[type="submit"]');
+  await expect(submit).toBeEnabled();
+  await submit.hover();
+  const click = (await submit.boundingBox())!;
+  const savePoint = { x: click.x + click.width - 12, y: click.y + click.height / 2 };
+  await page.mouse.move(savePoint.x, savePoint.y);
+
+  let releaseRead: () => void = () => undefined;
+  const readGate = new Promise<void>((resolve) => {
+    releaseRead = resolve;
+  });
+  let releaseWrite: () => void = () => undefined;
+  const writeGate = new Promise<void>((resolve) => {
+    releaseWrite = resolve;
+  });
+  let holdRead = false;
+  let readStatus = 0;
+  let writeStatus = 0;
+  const versions: number[] = [];
+  await page.route(`**/api/v1${path}`, async (route) => {
+    const incoming = route.request();
+    if (incoming.method() === 'GET' && holdRead) {
+      holdRead = false;
+      const response = await route.fetch();
+      readStatus = response.status();
+      await readGate;
+      return route.fulfill({ response });
+    }
+    if (incoming.method() === 'PATCH') {
+      versions.push(incoming.postDataJSON().expectedVersion);
+      const response = await route.fetch();
+      writeStatus = response.status();
+      await writeGate;
+      return route.fulfill({ response });
+    }
+    await route.continue();
+  });
+  try {
+    const before = live.hold(other);
+    await page.mouse.down();
+    await call(
+      `/work-orders/${other.id}`,
+      { expectedVersion: other.version, title: 'Another order changed' },
+      owner,
+      'PATCH',
+    );
+    holdRead = true;
+    await before();
+    await expect.poll(() => readStatus).toBe(200);
+    const enabledOnRelease = await submit.isEnabled();
+    const ownCommit = live.hold(order);
+    await page.mouse.up();
+    await expect
+      .poll(() => versions.length, {
+        message: `Browser PATCH count after the real Save click (submit enabled on pointer release: ${enabledOnRelease})`,
+      })
+      .toBe(1);
+    expect(enabledOnRelease).toBe(true);
+    expect(versions).toEqual([order.version]);
+    await expect.poll(() => writeStatus).toBe(200);
+    releaseRead();
+    await expect(submit).toBeDisabled();
+    await page.mouse.dblclick(savePoint.x, savePoint.y);
+    await ownCommit();
+
+    const during = live.hold(order, order.version + 2);
+    const newer = await call(
+      path,
+      {
+        expectedVersion: order.version + 1,
+        description: 'Owner updated while Save was pending',
+      },
+      owner,
+      'PATCH',
+    );
+    await during();
+    await expect(
+      page.getByText('Owner updated while Save was pending', { exact: true }),
+    ).toBeVisible();
+    await expect(submit).toBeDisabled();
+    releaseWrite();
+    await expect(modal).toHaveCount(0);
+    await expect(edit).toBeFocused();
+    await expect(
+      page.getByText('Owner updated while Save was pending', { exact: true }),
+    ).toBeVisible();
+
+    const after = live.hold(newer);
+    await call(
+      path,
+      { expectedVersion: newer.version, title: 'Changed after Save completed' },
+      owner,
+      'PATCH',
+    );
+    await after();
+    await expect(
+      page.getByRole('heading', { name: 'Changed after Save completed', exact: true }),
+    ).toBeVisible();
+    await expect(edit).toBeFocused();
+    expect(versions).toEqual([order.version]);
+  } finally {
+    releaseRead();
+    releaseWrite();
+    await page.unrouteAll({ behavior: 'wait' });
+  }
 });
 
 test('manager completes real customer → asset → scheduled/assigned work and collaboration', async ({
@@ -316,10 +847,38 @@ test('manager completes real customer → asset → scheduled/assigned work and 
   await dialog.getByRole('button', { name: 'Save changes', exact: true }).click();
   await expect(page.getByText('Check filter condition', { exact: true })).toBeVisible();
   await page.goto(detailUrl);
-  await page
-    .getByRole('combobox', { name: /^Checklist template/ })
-    .selectOption({ label: 'Ventilation inspection' });
-  await page.getByRole('button', { name: 'Apply checklist', exact: true }).click();
+  const template = page.getByRole('combobox', { name: /^Checklist template/ });
+  await template.selectOption({ label: 'Ventilation inspection' });
+  const apply = page.locator('form').filter({ has: template }).locator('button[type="submit"]');
+  const detailPath = new URL(detailUrl).pathname;
+  let finishChecklistRead: () => void = () => undefined;
+  const checklistRead = new Promise<void>((resolve) => {
+    finishChecklistRead = resolve;
+  });
+  let detailStatus = 0;
+  await page.route(`**/api/v1${detailPath}`, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const response = await route.fetch();
+    detailStatus = response.status();
+    await checklistRead;
+    await route.fulfill({ response });
+  });
+  try {
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect.poll(() => detailStatus).toBe(200);
+    await expect(apply).toBeEnabled();
+    const applied = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`${detailPath}/checklist/apply`) &&
+        response.request().method() === 'POST',
+    );
+    await apply.click();
+    expect((await applied).status()).toBe(200);
+  } finally {
+    finishChecklistRead();
+    await page.unrouteAll({ behavior: 'wait' });
+  }
+  await expect(page.getByRole('checkbox', { name: /Check filter condition/ })).toBeVisible();
   await page.getByRole('button', { name: 'Start work order', exact: true }).click();
   await dialog.getByRole('button', { name: 'Confirm start', exact: true }).click();
   await page.getByRole('button', { name: 'Complete work order', exact: true }).click();
@@ -914,6 +1473,7 @@ test('modal, closed-menu focus, contrast and archived templates work at 375, 768
       'hidden',
     );
     await page.goto('/overview');
+    await expect(page.getByText('Total work orders', { exact: true })).toBeVisible();
     for (const theme of ['light', 'dark']) {
       if (theme === 'dark') await page.getByRole('button', { name: 'Use dark theme' }).click();
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);

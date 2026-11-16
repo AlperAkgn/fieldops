@@ -63,4 +63,4 @@ Physical Android/iOS validation, native SQLCipher runtime/file behavior and back
 
 ## 11. Phase 6 readiness
 
-**Independent Quality Gate: READY.** Local automated evidence and implementation are available for independent review. **Phase 6 readiness: CONDITIONAL.** Final mobile acceptance depends on physical-device validation of Phases 4 and 5. Phase 6 requires separate authorization.
+**Independent Quality Gate: READY.** Local Phase 5 automated evidence is available for review. The owner subsequently authorized Phase 6 and deferred Phase 4 and 5 physical mobile acceptance until the development phases are complete. Native validation remains `DEFERRED / NOT VERIFIED`. [Phase 6 report](phase-6-results.md)

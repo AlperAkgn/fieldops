@@ -18,7 +18,7 @@ internal sealed class ApiFactory(string environment = "Development", string? con
             // HTTP tests drive the dispatcher explicitly. Keep the background poller
             // out of tests that deliberately point the API at an unreachable database.
             foreach (var worker in services.Where(service => service.ServiceType == typeof(IHostedService)
-                && service.ImplementationType?.Name == "EmailOutboxWorker").ToArray())
+                && service.ImplementationType?.Name is "EmailOutboxWorker" or "CollaborationWorker").ToArray())
             {
                 services.Remove(worker);
             }

@@ -35,9 +35,7 @@ Keep a verified pre-upgrade database backup and Data Protection key ring. Rehear
 | 2 | ChecklistTemplates, ChecklistTemplateItems, WorkOrderChecklistItems | Reusable templates and immutable per-order snapshots |
 | 2 | AuditLogs | Durable business audit separate from diagnostic logging |
 | 5 | SyncOperations, SyncChangeRecords | Operation receipts/deduplication and authorized incremental changes/tombstones |
-| 6 | WorkOrderAttachments, Notifications, DeviceRegistrations | Private files, in-app notifications, and push delivery targets |
-
-Add a transactional notification outbox when Phase 6 needs durable post-commit dispatch. Logical names above do not dictate premature tables or migration casing.
+| 6 | WorkOrderAttachments, WorkOrderEvents, InboxNotifications, PushDevices, PushDeliveries | Private files, a transactional work-order outbox, in-app notifications and push delivery tracking |
 
 ## Proposed entity relationships
 
@@ -109,6 +107,8 @@ Add tenant-leading indexes for actual query patterns: work order status/planned 
 Customer DELETE means archive, retaining service history. Define archive visibility explicitly; historical work order references remain readable to authorized users. Sync removal/revocation emits an authorized tombstone or invalidates the device scope; never silently omit a formerly cached record. Cursor/tombstone and idempotency retention policies are finalized and tested in Phase 5 before pruning is enabled.
 
 ## Migration and test policy
+
+Phase 6 migration `20261114123641_CollaborationAndAttachments` adds work-order events, inbox notifications, push devices, push delivery attempts, and attachment metadata. The event outbox uses the existing work-order transaction and audit. Attachment reservations stay hidden until object storage confirms the write. Downgrade refuses to remove attachment, inbox or push-device records. SQLite schema 2 adds the workspace time zone to the Phase 5 sync state and keeps the existing order cache and queued edits.
 
 Phase 5 migration `20261113203829_OfflineSynchronization` creates `SyncReceipts`, `SyncWorkOrderChanges` and `SyncWatermarks`. Receipt keys include tenant/user/operation and composite tenant foreign keys. A transactional trigger maintains the tenant watermark and latest work-order position. The migration locks work-order writes during backfill and preserves prior versions and audit rows. Downgrade refuses to remove committed receipts. [Cursor and retention details](offline-sync.md#push-and-pull)
 

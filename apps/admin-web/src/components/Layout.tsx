@@ -5,6 +5,7 @@ import {
   Activity,
   ArrowUpRight,
   BarChart3,
+  Bell,
   Building2,
   CalendarDays,
   ChevronDown,
@@ -25,11 +26,13 @@ import { api, logout, selectOrganization, updateRole } from '../api/client';
 import type { Organization, Profile } from '../api/contracts';
 import { canManage, useSession } from '../api/session';
 import { useToast } from './ui-state';
+import { useRealtime } from '../api/realtime';
 
 const nav = [
   { to: '/overview', label: 'Overview', icon: Activity, manager: true },
   { to: '/work-orders', label: 'Work orders', icon: ClipboardList },
   { to: '/scheduling', label: 'Schedule', icon: CalendarDays, manager: true },
+  { to: '/notifications', label: 'Notifications', icon: Bell },
   { to: '/customers', label: 'Customers', icon: Building2, catalog: true },
   { to: '/service-locations', label: 'Service locations', icon: Layers3, catalog: true },
   { to: '/assets', label: 'Assets', icon: Wrench, catalog: true },
@@ -39,6 +42,7 @@ const nav = [
 export function Layout() {
   const session = useSession();
   const client = useQueryClient();
+  useRealtime();
   const toast = useToast();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);

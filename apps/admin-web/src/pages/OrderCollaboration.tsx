@@ -148,7 +148,7 @@ export function OrderCollaboration({
                 }
                 submitLabel="Apply checklist"
                 error={undefined}
-                pending={action.busy}
+                pending={action.writing}
               />
             )}
           </>

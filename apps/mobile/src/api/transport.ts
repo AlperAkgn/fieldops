@@ -37,7 +37,11 @@ export class NativeTransport {
     private fetcher: typeof fetch = fetch,
     private timeoutMs = 15000,
   ) {}
-  async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  async request<T>(
+    path: string,
+    options: RequestOptions = {},
+    consume?: (response: Response) => Promise<T>,
+  ): Promise<T> {
     if (!path.startsWith('/') || path.startsWith('//') || /[\r\n]/.test(path))
       throw new Error('Invalid API path.');
     const controller = new AbortController();
@@ -49,8 +53,9 @@ export class NativeTransport {
       const response = await this.fetcher(`${this.origin}/api/v1${path}`, {
         method: options.method || 'GET',
         credentials: 'omit',
+        ...(consume ? { redirect: 'error' } : {}),
         headers: {
-          Accept: 'application/json',
+          Accept: consume ? '*/*' : 'application/json',
           ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
           ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
         },
@@ -71,6 +76,7 @@ export class NativeTransport {
           retryAfter > 0 ? retryAfter : undefined,
         );
       }
+      if (consume) return await consume(response);
       return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
     } catch (error) {
       if (controller.signal.aborted && !options.signal?.aborted)

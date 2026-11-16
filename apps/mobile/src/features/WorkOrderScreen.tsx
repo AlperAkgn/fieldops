@@ -28,6 +28,7 @@ import {
 } from '../components/ui';
 import { dateTime, mapUrl, message, statusLabel } from './orders';
 import { useOrder, useOrderWrite, useWorkspace } from './queries';
+import { MobileAttachments } from './attachments';
 
 export function WorkOrderScreen({
   id,
@@ -479,6 +480,7 @@ export function WorkOrderScreen({
               )}
             </Card>
           )}
+          <MobileAttachments key={`${id}:${key[4]}`} id={id} />
           <Confirm
             visible={!!confirm}
             busy={write.isPending || sessionBusy}

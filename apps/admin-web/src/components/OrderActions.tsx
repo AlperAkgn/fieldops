@@ -3,61 +3,106 @@ import { WorkOrderError } from './WorkOrderError';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, queryString } from '../api/client';
-import type { Assignment, Page, Technician, WorkOrder } from '../api/contracts';
-import { localDateTime } from '../api/hooks';
+import type { Assignment, Organization, Page, Technician, WorkOrder } from '../api/contracts';
+import { scheduleInstant, scheduleLocal } from '../api/calendar';
 import { useSession } from '../api/session';
 import { Form } from './Form';
 import { Empty, ErrorBox, Modal, Pagination } from './ui';
 
-export function ScheduleDialog({ order, onClose }: { order: WorkOrder; onClose: () => void }) {
+export function ScheduleDialog({
+  order,
+  onClose,
+  proposal,
+}: {
+  order: WorkOrder;
+  onClose: () => void;
+  proposal?: { start: string; end: string } | null;
+}) {
   const [snapshot] = useState(order);
+  const [timeError, setTimeError] = useState<Error | null>(null);
   const action = useWorkOrderAction(order.id, onClose);
+  const session = useSession();
+  const organizations = useQuery({
+    queryKey: [
+      session?.tenantId,
+      session?.userId,
+      session?.role,
+      session?.sessionId,
+      'organizations',
+    ],
+    queryFn: ({ signal }) => api<Organization[]>('/organizations', { signal }),
+  });
+  const zone = organizations.data?.find((item) => item.id === session?.tenantId)?.timeZoneId;
   const reload = () => {
     onClose();
     void action.reload().catch(() => undefined);
   };
   return (
     <Modal title="Schedule work order" onClose={onClose}>
-      <p className="muted">
-        Times use your browser’s local time zone ({Intl.DateTimeFormat().resolvedOptions().timeZone}
-        ). Availability is checked by the server.
-      </p>
-      <Form
-        fields={[
-          {
-            name: 'plannedStartAt',
-            label: 'Planned start',
-            type: 'datetime-local',
-            required: true,
-          },
-          { name: 'plannedEndAt', label: 'Planned end', type: 'datetime-local', required: true },
-          {
-            name: 'overrideReason',
-            label: 'Availability override reason',
-            type: 'textarea',
-            max: 500,
-            help: 'Only use an override after reviewing a conflict. The reason is recorded in audit history.',
-          },
-        ]}
-        initial={{
-          plannedStartAt: localDateTime(order.plannedStartAt),
-          plannedEndAt: localDateTime(order.plannedEndAt),
-        }}
-        onSubmit={(values) =>
-          action.mutateAsync({
-            path: `/work-orders/${order.id}/schedule`,
-            body: {
-              expectedVersion: snapshot.version,
-              plannedStartAt: new Date(values.plannedStartAt!).toISOString(),
-              plannedEndAt: new Date(values.plannedEndAt!).toISOString(),
-              overrideReason: values.overrideReason || undefined,
-            },
-          })
-        }
-        error={undefined}
-        pending={action.busy}
-        submitLabel="Save schedule"
-      />
+      {organizations.error && <ErrorBox error={organizations.error} />}
+      {!zone && !organizations.error && <p role="status">Loading workspace time zone…</p>}
+      {zone && (
+        <>
+          <p className="muted">
+            Times use the workspace time zone ({zone}). The server checks technician availability.
+          </p>
+          <Form
+            fields={[
+              {
+                name: 'plannedStartAt',
+                label: 'Planned start',
+                type: 'datetime-local',
+                required: true,
+              },
+              {
+                name: 'plannedEndAt',
+                label: 'Planned end',
+                type: 'datetime-local',
+                required: true,
+              },
+              {
+                name: 'overrideReason',
+                label: 'Availability override reason',
+                type: 'textarea',
+                max: 500,
+                help: 'Only use an override after reviewing a conflict. The reason is recorded in audit history.',
+              },
+            ]}
+            initial={{
+              plannedStartAt: proposal?.start ?? scheduleLocal(snapshot.plannedStartAt, zone),
+              plannedEndAt: proposal?.end ?? scheduleLocal(snapshot.plannedEndAt, zone),
+            }}
+            onSubmit={async (values) => {
+              setTimeError(null);
+              let plannedStartAt: string;
+              let plannedEndAt: string;
+              try {
+                plannedStartAt = scheduleInstant(
+                  values.plannedStartAt!,
+                  zone,
+                  snapshot.plannedStartAt,
+                );
+                plannedEndAt = scheduleInstant(values.plannedEndAt!, zone, snapshot.plannedEndAt);
+              } catch (error) {
+                if (error instanceof Error) setTimeError(error);
+                return;
+              }
+              return action.mutateAsync({
+                path: `/work-orders/${order.id}/schedule`,
+                body: {
+                  expectedVersion: snapshot.version,
+                  plannedStartAt,
+                  plannedEndAt,
+                  overrideReason: values.overrideReason || undefined,
+                },
+              });
+            }}
+            error={timeError}
+            pending={action.busy}
+            submitLabel="Save schedule"
+          />
+        </>
+      )}
       <WorkOrderError error={action.error} reload={reload} />
     </Modal>
   );

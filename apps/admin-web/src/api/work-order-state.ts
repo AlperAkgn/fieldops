@@ -16,9 +16,9 @@ export function useWorkOrderState(id: string) {
   const scope = [session?.tenantId, session?.userId, session?.role, session?.sessionId];
   const detailKey = [...scope, 'work-orders', id];
   const mutationKey = [...scope, 'work-order-write', id];
-  const writing = useIsMutating({ mutationKey, exact: true });
-  const fetching = useIsFetching({ queryKey: detailKey, exact: true });
-  return { scope, detailKey, mutationKey, busy: writing > 0 || fetching > 0 };
+  const writing = useIsMutating({ mutationKey, exact: true }) > 0;
+  const fetching = useIsFetching({ queryKey: detailKey, exact: true }) > 0;
+  return { scope, detailKey, mutationKey, writing, busy: writing || fetching };
 }
 
 export function useWorkOrderAction(id: string, onSuccess?: () => void) {
@@ -91,5 +91,5 @@ export function useWorkOrderAction(id: string, onSuccess?: () => void) {
       if (context?.ownsLock) locks.get(client)?.delete(lockId);
     },
   });
-  return { ...mutation, busy: state.busy, reload };
+  return { ...mutation, busy: state.busy, writing: state.writing, reload };
 }

@@ -16,13 +16,13 @@ import {
   Pill,
   styles,
 } from '../components/ui';
-import { dateTime, message, statusLabel, todayRange } from './orders';
+import { dateTime, message, statusLabel, todayRange, upcomingRange } from './orders';
 import { useApi, useWorkspace } from './queries';
 import { useOffline } from '../offline/runtime';
 import { OfflineOrders } from '../offline/screens';
 export function OrdersScreen({ today = false }: { today?: boolean }) {
   const { offline, snapshot } = useOffline();
-  if (offline || snapshot?.rebuilding) return <OfflineOrders />;
+  if (offline || snapshot?.rebuilding) return <OfflineOrders today={today} />;
   return <OnlineOrders today={today} />;
 }
 function OnlineOrders({ today }: { today: boolean }) {
@@ -33,6 +33,7 @@ function OnlineOrders({ today }: { today: boolean }) {
   const [status, setStatus] = useState('');
   const [priority, setPriority] = useState('');
   const [page, setPage] = useState(1);
+  const [upcoming, setUpcoming] = useState(false);
   const [filter, setFilter] = useState<'status' | 'priority' | null>(null);
   const zone = workspace.data?.current?.timeZoneId;
   const [clock, setClock] = useState(() => new Date());
@@ -48,7 +49,10 @@ function OnlineOrders({ today }: { today: boolean }) {
       subscription.remove();
     };
   }, [today]);
-  const range = useMemo(() => (today && zone ? todayRange(zone, clock) : {}), [today, zone, clock]);
+  const range = useMemo(() => {
+    if (!today || !zone) return {};
+    return upcoming ? upcomingRange(zone, clock) : todayRange(zone, clock);
+  }, [today, zone, clock, upcoming]);
   const filters = { search: submitted, status, priority, page, ...range };
   const orders = useQuery({
     queryKey: [...scope, 'orders', filters],
@@ -91,9 +95,19 @@ function OnlineOrders({ today }: { today: boolean }) {
             </Text>
             <Text style={styles.title}>{today ? copy.yourDayInTheField : copy.yourWorkOrders}</Text>
             <Text style={styles.subtitle}>
-              {today ? copy.scheduledToday : copy.assignedToYou}
+              {today ? (upcoming ? 'Upcoming work · ' : copy.scheduledToday) : copy.assignedToYou}
               {zone || 'Loading timezone…'}
             </Text>
+            {today && (
+              <Button
+                title={upcoming ? 'Show today' : 'Show upcoming work'}
+                secondary
+                onPress={() => {
+                  setUpcoming(!upcoming);
+                  setPage(1);
+                }}
+              />
+            )}
             <Field
               label={copy.searchWorkOrders}
               placeholder={copy.numberOrTitle}

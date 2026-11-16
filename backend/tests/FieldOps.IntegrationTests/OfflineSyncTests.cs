@@ -190,11 +190,6 @@ public sealed class OfflineSyncTests : CoreOperationsTestBase
     [Fact]
     public async Task UpgradeBackfillsExistingOrdersWithoutChangingHistory()
     {
-        await InDatabaseAsync(async context =>
-        {
-            var previous = context.Database.GetMigrations().Reverse().Skip(1).First();
-            await context.GetService<IMigrator>().MigrateAsync(previous);
-        });
         var owner = await RegisterAsync();
         var technician = await RegisterAsync();
         var actor = await JoinAsync(owner, technician, OrganizationRole.Technician);
@@ -202,6 +197,14 @@ public sealed class OfflineSyncTests : CoreOperationsTestBase
             await OrderAsync(owner.Tokens, await CatalogAsync(owner.Tokens))), actor.UserId);
         var path = $"/audit-logs?resourceId={Id(order)}";
         var audit = await CallAsync(HttpMethod.Get, path, owner.Tokens);
+        // Keep the current API on its current schema while creating fixtures. Remove only
+        // the sync feed in this disposable database to rehearse the historical backfill.
+        await InDatabaseAsync(async context =>
+        {
+            var previous = context.Database.GetMigrations().Single(name => name.EndsWith("_AuditOperationalChanges", StringComparison.Ordinal));
+            await context.Database.ExecuteSqlRawAsync("""TRUNCATE TABLE "InboxNotifications" CASCADE""");
+            await context.GetService<IMigrator>().MigrateAsync(previous);
+        });
         await InDatabaseAsync(async context => await context.Database.MigrateAsync());
         var snapshot = await CallAsync(HttpMethod.Get, "/sync/pull?protocol=1", actor);
         var backfilled = Assert.Single(snapshot["orders"]!.AsArray())!["order"]!;

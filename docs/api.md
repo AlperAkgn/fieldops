@@ -137,6 +137,23 @@ Registration creates the user, initial organization, and Owner membership in one
 
 ## Idempotency, realtime, and errors
 
+### Phase 6 collaboration routes
+
+| Route | Access and behavior |
+| --- | --- |
+| `GET /api/v1/live` and `POST /api/v1/live/negotiate` | Bearer-authenticated SignalR; WebSocket browser query token allowed only on the live upgrade. Every recipient is revalidated against the session and work-order access. |
+| `GET /api/v1/notifications?page=&pageSize=` | Current user's workspace inbox. Links are absent when current resource access has ended. |
+| `POST /api/v1/notifications/{id}/read` | Idempotently mark a private notification read. |
+| `PUT /api/v1/notifications/devices/{id}` | Technician registration and rotation, using a device installation UUID and `{ "token": "…" }`. |
+| `DELETE /api/v1/notifications/devices/{id}` | Revoke the calling user and session's registration. |
+| `GET /api/v1/work-orders/{id}/attachments` | List ready files after work-order authorization. |
+| `POST /api/v1/work-orders/{id}/attachments` | Authorized execution role, raw JPEG, PNG or PDF up to 8 MiB, `X-File-Name` and UUID `Idempotency-Key`. Same request returns the existing result. |
+| `GET /api/v1/work-orders/{id}/attachments/{attachmentId}` | Authorized file response with safe attachment disposition, `nosniff`, and `no-store`. |
+
+`OrderChanged` carries an event ID, optional work-order ID, aggregate version, and change kind. An assignment removal hint omits the work-order ID. Clients treat messages as invalidations and reload authoritative state on reconnect. Hosted proxies must redact the WebSocket `access_token` query parameter. Attachment content type and header signatures are validated. Separate malware analysis is outside the current deployment.
+
+The existing reports payload includes `execution` metrics. Average elapsed completion time uses actual server timestamps and excludes orders without both timestamps. Overlap counts distinct active orders in the requested reporting scope sharing a technician and an intersecting planned interval.
+
 Sync operations carry OperationId, entity/type, ExpectedVersion, ClientCreatedAt, and payload. Their atomic receipt/result contract and duplicate handling are specified in [offline-sync.md](offline-sync.md). State-changing endpoints use explicit action commands; arbitrary PATCH cannot bypass the domain state machine or alter assignment/tenant/version fields.
 
 Phase 5 adds bearer-authenticated `GET /api/v1/sync/pull?protocol=1&cursor=…` and `POST /api/v1/sync/push` for the active Technician workspace. Push accepts 1–20 operations and returns a result for each command, including any version conflict and the current authorized version. Pull returns a maximum of 20 assigned-order snapshots and a scoped cursor. `409 sync_resnapshot_required` invalidates the previous download. [Protocol, responses and retention](offline-sync.md)

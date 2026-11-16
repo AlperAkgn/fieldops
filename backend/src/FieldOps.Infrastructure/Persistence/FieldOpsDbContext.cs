@@ -79,6 +79,8 @@ public sealed partial class FieldOpsDbContext(DbContextOptions<FieldOpsDbContext
         ConfigureWorkOrders(modelBuilder);
         ConfigureWorkOrderDetails(modelBuilder);
         ConfigureSync(modelBuilder);
+        ConfigureCollaboration(modelBuilder);
+        ConfigureAttachments(modelBuilder);
     }
 
     partial void ConfigureOrganizations(ModelBuilder modelBuilder);

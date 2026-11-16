@@ -1,6 +1,6 @@
 import { useWorkOrderAction } from '../api/work-order-state';
 import { WorkOrderError } from '../components/WorkOrderError';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -38,6 +38,7 @@ import {
 } from '../components/ui';
 import { AssignDialog, ScheduleDialog } from '../components/OrderActions';
 import { OrderCollaboration } from './OrderCollaboration';
+import { OrderAttachments } from './OrderAttachments';
 const orderFields: Field[] = [
   { name: 'title', label: 'Title', required: true, max: 160 },
   { name: 'priority', label: 'Priority', type: 'select', options: priorities, required: true },
@@ -260,17 +261,37 @@ export function WorkOrderDetailPage() {
   const [snapshot, setSnapshot] = useState<WorkOrder | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const action = useWorkOrderAction(id || '', () => setDialog(''));
+  const editTrigger = useCallback((button: HTMLButtonElement | null) => {
+    if (!button) return;
+    return () => {
+      if (document.activeElement === button) returnFocus.current = button;
+    };
+  }, []);
   useLayoutEffect(() => {
-    if (dialog || action.busy || !returnFocus.current) return;
+    const clearOnFocusMove = (event: FocusEvent) => {
+      if (returnFocus.current && event.target !== document.getElementById('main'))
+        returnFocus.current = null;
+    };
+    document.addEventListener('focusin', clearOnFocusMove);
+    return () => document.removeEventListener('focusin', clearOnFocusMove);
+  }, []);
+  useLayoutEffect(() => {
     const target = returnFocus.current;
-    returnFocus.current = null;
+    if (dialog || !target) return;
     const main = document.getElementById('main');
-    // Layout effects run after the trigger's disabled attribute has been committed.
-    // Do not steal focus if the user has already moved away from the fallback.
-    if (![main, document.body, target].includes(document.activeElement as HTMLElement)) return;
-    if (target.isConnected && target !== document.body) target.focus();
-    if (document.activeElement !== target || target === document.body) main?.focus();
-  }, [dialog, action.busy]);
+    const active = document.activeElement;
+    if (active !== main && active !== document.body && active !== target) {
+      returnFocus.current = null;
+    } else if (!target.isConnected || target === document.body) {
+      main?.focus();
+      returnFocus.current = null;
+    } else if (!action.writing) {
+      // Keep a temporarily unfocusable target until a subsequent commit.
+      if (active !== target) target.focus();
+      if (document.activeElement === target) returnFocus.current = null;
+      else if (document.activeElement === document.body) main?.focus();
+    }
+  });
   const reload = () => {
     setDialog('');
     action.reset();
@@ -299,11 +320,10 @@ export function WorkOrderDetailPage() {
     );
   const { order, customer, serviceLocation, asset, assignments } = query.data;
   const openDialog = (name: string) => {
-    if (!action.busy) {
-      setSnapshot(order);
-      setDialog(name);
-      action.reset();
-    }
+    if (name === 'edit' ? action.writing : action.busy) return;
+    setSnapshot(order);
+    setDialog(name);
+    action.reset();
   };
   const command = snapshot || order;
   const manage = canManage(session?.role);
@@ -341,8 +361,9 @@ export function WorkOrderDetailPage() {
         </button>
         {manage && !terminal && (
           <button
+            ref={editTrigger}
             className="btn secondary"
-            disabled={action.busy}
+            disabled={action.writing}
             onClick={() => openDialog('edit')}
           >
             Edit work order
@@ -401,6 +422,11 @@ export function WorkOrderDetailPage() {
             </dl>
           </Panel>
           <OrderCollaboration order={order} execute={execute} manage={manage} />
+          <OrderAttachments
+            key={`${session?.sessionId}:${session?.role}:${order.id}`}
+            orderId={order.id}
+            execute={execute}
+          />
         </div>
         <div className="section-stack">
           <Panel title="Schedule" action={<CalendarDays size={17} />}>
@@ -503,7 +529,7 @@ export function WorkOrderDetailPage() {
               })
             }
             error={undefined}
-            pending={action.busy}
+            pending={action.writing}
           />
           <WorkOrderError error={action.error} reload={reload} />
         </Modal>

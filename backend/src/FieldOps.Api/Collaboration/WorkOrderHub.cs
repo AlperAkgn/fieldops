@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Security.Claims;
 using FieldOps.Application.Collaboration;
+using FieldOps.Application.Common;
 using FieldOps.Application.Tenancy;
 using FieldOps.Domain.Organizations;
 using Microsoft.AspNetCore.SignalR;
@@ -20,13 +22,13 @@ public sealed class WorkOrderHub(ICollaborationAccess access, WorkOrderConnectio
             Context.Abort();
             return;
         }
-        connections.Active.TryAdd(Context.ConnectionId, actor);
+        connections.Register(Context.ConnectionId, actor);
         await base.OnConnectedAsync();
     }
 
     public override Task OnDisconnectedAsync(Exception? exception)
     {
-        connections.Active.TryRemove(Context.ConnectionId, out _);
+        connections.Remove(Context.ConnectionId);
         return base.OnDisconnectedAsync(exception);
     }
 }
@@ -34,6 +36,16 @@ public sealed class WorkOrderHub(ICollaborationAccess access, WorkOrderConnectio
 public sealed class WorkOrderConnections
 {
     internal ConcurrentDictionary<string, TenantActor> Active { get; } = new();
+
+    internal void Register(string id, TenantActor actor)
+    {
+        if (Active.TryAdd(id, actor)) FieldOpsTelemetry.ConnectionChanged(1);
+    }
+
+    internal void Remove(string id)
+    {
+        if (Active.TryRemove(id, out _)) FieldOpsTelemetry.ConnectionChanged(-1);
+    }
 }
 
 internal sealed class SignalROrderDelivery(IHubContext<WorkOrderHub> hub, WorkOrderConnections connections,
@@ -42,13 +54,14 @@ internal sealed class SignalROrderDelivery(IHubContext<WorkOrderHub> hub, WorkOr
     public async Task DeliverAsync(Guid tenantId, OrderChanged change, IReadOnlyCollection<Guid> formerAssignees,
         CancellationToken cancellationToken)
     {
+        using var activity = FieldOpsTelemetry.Activities.StartActivity("signalr.fanout", ActivityKind.Producer);
         foreach (var (connectionId, connected) in connections.Active)
         {
             if (connected.TenantId != tenantId) continue;
             var actor = await access.ValidateAsync(connected, cancellationToken);
             if (actor is null || actor.Role != connected.Role)
             {
-                connections.Active.TryRemove(connectionId, out _);
+                connections.Remove(connectionId);
                 continue;
             }
 

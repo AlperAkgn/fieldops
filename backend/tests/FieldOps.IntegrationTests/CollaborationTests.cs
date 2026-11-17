@@ -1,12 +1,19 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Net;
+using System.Net.Http.Json;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using FieldOps.Application.Collaboration;
+using FieldOps.Application.Common;
 using FieldOps.Application.Identity;
 using FieldOps.Domain.Organizations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
+using OpenTelemetry.Metrics;
 
 namespace FieldOps.IntegrationTests;
 
@@ -136,15 +143,92 @@ public sealed class CollaborationTests : CoreOperationsTestBase
         await scope.ServiceProvider.GetRequiredService<ICollaborationDispatcher>().DispatchAsync(CancellationToken.None);
     }
 
+    [Fact]
+    public async Task SocketUpgradeAndLifetimeStayOutsideTheNormalHttpHistogram()
+    {
+        var owner = await RegisterAsync();
+        await using var collector = await OtlpReceiver.StartAsync();
+        await using var factory = new ApiFactory(connectionString: DatabaseConnectionString,
+            settings: new Dictionary<string, string?> { ["Telemetry:OtlpEndpoint"] = collector.Origin });
+        var socketTrace = ActivityTraceId.CreateRandom();
+        var traces = new ConcurrentQueue<(ActivityTraceId Trace, string Operation, double Duration)>();
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var metrics = new MeterListener();
+        metrics.InstrumentPublished = (instrument, listener) =>
+        {
+            if (instrument.Meter.Name == FieldOpsTelemetry.Name && instrument.Name == "fieldops.duration")
+                listener.EnableMeasurementEvents(instrument);
+        };
+        metrics.SetMeasurementEventCallback<double>((_, value, tags, _) =>
+        {
+            if (Activity.Current is not { } activity || tags[0].Value is not string operation) return;
+            traces.Enqueue((activity.TraceId, operation, value));
+            if (activity.TraceId == socketTrace && operation == "websocket.connection") closed.TrySetResult();
+        });
+        metrics.Start();
+
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        using var socket = await ConnectAsync(factory, owner.Tokens, Parent(socketTrace), deadline.Token);
+        Assert.Contains(traces, metric => metric.Trace == socketTrace && metric.Operation == "websocket.upgrade");
+        Assert.DoesNotContain(traces, metric => metric.Trace == socketTrace && metric.Operation == "websocket.connection");
+
+        using var client = factory.CreateClient();
+        await HttpAsync(HttpMethod.Get, "/health/live", HttpStatusCode.OK);
+        await HttpAsync(HttpMethod.Post, "/api/v1/auth/login", HttpStatusCode.OK);
+        await HttpAsync(HttpMethod.Get, "/api/v1/auth/me", HttpStatusCode.Unauthorized);
+        var rejectedTrace = ActivityTraceId.CreateRandom();
+        var unauthenticated = factory.Server.CreateWebSocketClient();
+        unauthenticated.ConfigureRequest = context => context.Headers["traceparent"] = Parent(rejectedTrace);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            unauthenticated.ConnectAsync(new Uri("wss://localhost/api/v1/live"), deadline.Token));
+        Assert.Contains(traces, metric => metric.Trace == rejectedTrace && metric.Operation == "http");
+        Assert.DoesNotContain(traces, metric => metric.Trace == rejectedTrace && metric.Operation.StartsWith("websocket", StringComparison.Ordinal));
+
+        // Keep the connection open beyond the HTTP measurements before the close handshake.
+        await Task.Delay(TimeSpan.FromMilliseconds(400), deadline.Token);
+        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "", deadline.Token);
+        await closed.Task.WaitAsync(deadline.Token);
+        Assert.DoesNotContain(traces, metric => metric.Trace == socketTrace && metric.Operation == "http");
+        Assert.True(Assert.Single(traces, metric => metric.Trace == socketTrace && metric.Operation == "websocket.connection").Duration >= 400);
+        Assert.True(factory.Services.GetRequiredService<MeterProvider>().ForceFlush(5000));
+        var exported = string.Join('\n', collector.Payloads.Where(received => received.Signal == "metrics").Select(received => received.Payload));
+        Assert.Contains("fieldops.duration", exported);
+        Assert.Contains("websocket.upgrade", exported);
+        Assert.Contains("websocket.connection", exported);
+
+        async Task HttpAsync(HttpMethod method, string path, HttpStatusCode expected)
+        {
+            var id = ActivityTraceId.CreateRandom();
+            using var request = new HttpRequestMessage(method, path);
+            if (method == HttpMethod.Post) request.Content = JsonContent.Create(new { owner.Email, owner.Password });
+            request.Headers.Add("traceparent", Parent(id));
+            using var response = await client.SendAsync(request, deadline.Token);
+            Assert.Equal(expected, response.StatusCode);
+            Assert.Contains(traces, metric => metric.Trace == id && metric.Operation == "http");
+        }
+
+        static string Parent(ActivityTraceId trace) => $"00-{trace}-{ActivitySpanId.CreateRandom()}-01";
+    }
+
     private async Task<System.Net.WebSockets.WebSocket> ConnectAsync(TokenPair actor)
     {
-        var client = Factory.Server.CreateWebSocketClient();
-        client.ConfigureRequest = request => request.Headers.Authorization = $"Bearer {actor.AccessToken}";
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var socket = await client.ConnectAsync(new Uri("wss://localhost/api/v1/live"), deadline.Token);
+        return await ConnectAsync(Factory, actor, null, deadline.Token);
+    }
+
+    private static async Task<WebSocket> ConnectAsync(Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> factory,
+        TokenPair actor, string? traceparent, CancellationToken deadline)
+    {
+        var client = factory.Server.CreateWebSocketClient();
+        client.ConfigureRequest = request =>
+        {
+            request.Headers.Authorization = $"Bearer {actor.AccessToken}";
+            if (traceparent is not null) request.Headers["traceparent"] = traceparent;
+        };
+        var socket = await client.ConnectAsync(new Uri("wss://localhost/api/v1/live"), deadline);
         await socket.SendAsync(Encoding.UTF8.GetBytes("{\"protocol\":\"json\",\"version\":1}\u001e").AsMemory(),
-            System.Net.WebSockets.WebSocketMessageType.Text, true, deadline.Token);
-        var result = await ReadFrameAsync(socket, deadline.Token);
+            System.Net.WebSockets.WebSocketMessageType.Text, true, deadline);
+        var result = await ReadFrameAsync(socket, deadline);
         Assert.Equal("{}", result);
         return socket;
     }
@@ -200,6 +284,8 @@ public sealed class CollaborationTests : CoreOperationsTestBase
         }
         using var unsafeName = await UploadAsync("..%2Fvisit.png", bytes);
         Assert.Equal(HttpStatusCode.BadRequest, unsafeName.StatusCode);
+        using var whitespaceName = await UploadAsync("%20..%20", bytes);
+        Assert.Equal(HttpStatusCode.BadRequest, whitespaceName.StatusCode);
         using var oversized = await UploadAsync("visit.png", new byte[IAttachments.MaxBytes + 1]);
         Assert.Equal(HttpStatusCode.BadRequest, oversized.StatusCode);
         storage.Fail = true;

@@ -98,7 +98,7 @@ export function ScheduleDialog({
               });
             }}
             error={timeError}
-            pending={action.busy}
+            pending={action.writing}
             submitLabel="Save schedule"
           />
         </>
@@ -249,7 +249,7 @@ export function AssignDialog({
         )}
         <WorkOrderError error={action.error} reload={reload} />
         <div className="form-actions">
-          <button className="btn primary" disabled={action.busy}>
+          <button className="btn primary" disabled={action.writing}>
             Save assignments
           </button>
         </div>

@@ -25,10 +25,14 @@ internal sealed class WorkOrderDetailService(FieldOpsDbContext database, Operati
                         item.SourceTemplateItemId, item.Label, item.Position, item.IsRequired, item.IsCompleted,
                         item.CompletedByUserId, item.CompletedAt)).ToList()
             }).SingleOrDefaultAsync(cancellationToken) ?? throw WorkOrderAccess.NotFound();
-        var completed = order.Items.Count(item => item.IsCompleted);
-        return new WorkOrderChecklistDto(order.Id, order.Version, order.Items.Count, completed,
-            order.Items.Count == 0 ? 0 : completed * 100 / order.Items.Count,
-            order.Items.All(item => !item.IsRequired || item.IsCompleted), order.Items);
+        return ToChecklist(order.Id, order.Version, order.Items);
+    }
+
+    internal static WorkOrderChecklistDto ToChecklist(Guid orderId, long version, IReadOnlyList<WorkOrderChecklistItemDto> items)
+    {
+        var completed = items.Count(item => item.IsCompleted);
+        return new(orderId, version, items.Count, completed, items.Count == 0 ? 0 : completed * 100 / items.Count,
+            items.All(item => !item.IsRequired || item.IsCompleted), items);
     }
 
     public async Task<WorkOrderChecklistDto> ApplyChecklistAsync(Guid workOrderId, ApplyChecklistTemplateRequest request,

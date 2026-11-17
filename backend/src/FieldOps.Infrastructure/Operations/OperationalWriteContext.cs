@@ -16,7 +16,8 @@ internal sealed class OperationalWriteContext(FieldOpsDbContext database, Tenant
     {
         var audit = AuditLog.Record(Actor.TenantId, Actor.UserId, "work_order", orderId, "attachment_added", null, Now);
         database.AuditLogs.Add(audit);
-        database.WorkOrderEvents.Add(new(audit.Id, Actor.TenantId, orderId, version, "attachment_added", audit.OccurredAt, []));
+        database.WorkOrderEvents.Add(new(audit.Id, Actor.TenantId, orderId, version, "attachment_added", audit.OccurredAt, [])
+        { TraceParent = FieldOpsTelemetry.CurrentTraceParent });
     }
 
     public TenantActor Actor => tenant.Actor ??
@@ -62,7 +63,8 @@ internal sealed class OperationalWriteContext(FieldOpsDbContext database, Tenant
         var order = database.ChangeTracker.Entries<WorkOrder>().Single(entry => entry.Entity.Id == resourceId).Entity;
         var assignmentChange = metadata?.Changes.TechnicianUserIds;
         var removed = assignmentChange?.Previous.Except(assignmentChange.Current).ToArray() ?? [];
-        database.WorkOrderEvents.Add(new(audit.Id, Actor.TenantId, resourceId, order.Version, action, audit.OccurredAt, removed));
+        database.WorkOrderEvents.Add(new(audit.Id, Actor.TenantId, resourceId, order.Version, action, audit.OccurredAt, removed)
+        { TraceParent = FieldOpsTelemetry.CurrentTraceParent });
         if (assignmentChange is not null)
         {
             foreach (var (user, kind) in assignmentChange.Current.Select(user =>

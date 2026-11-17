@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -26,6 +26,7 @@ import { api, logout, selectOrganization, updateRole } from '../api/client';
 import type { Organization, Profile } from '../api/contracts';
 import { canManage, useSession } from '../api/session';
 import { useToast } from './ui-state';
+import { Skeleton } from './ui';
 import { useRealtime } from '../api/realtime';
 
 const nav = [
@@ -315,7 +316,9 @@ export function Layout() {
           </div>
         </header>
         <main id="main" tabIndex={-1}>
-          <Outlet />
+          <Suspense fallback={<Skeleton />}>
+            <Outlet />
+          </Suspense>
         </main>
         <footer className="app-footer">
           FieldOps workspace<span>Built for the work ahead.</span>

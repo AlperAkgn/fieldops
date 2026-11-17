@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using FieldOps.Application.Collaboration;
+using FieldOps.Application.Common;
 using FieldOps.Domain.Organizations;
 using FieldOps.Infrastructure.Persistence;
 using Microsoft.AspNetCore.DataProtection;
@@ -15,15 +17,36 @@ internal sealed class CollaborationDispatcher(FieldOpsDbContext db, IOrderChange
 {
     public async Task DispatchAsync(CancellationToken cancellationToken)
     {
+        await DispatchChangesAsync(cancellationToken);
+        await MaintainAsync(cancellationToken);
+    }
+
+    public async Task<bool> DispatchChangesAsync(CancellationToken cancellationToken)
+    {
+        using var system = db.BeginSystemScope();
+        for (var index = 0; index < 25; index++)
+            if (!await DispatchChangeAsync(cancellationToken)) return false;
+        return true;
+    }
+
+    public async Task MaintainAsync(CancellationToken cancellationToken)
+    {
         using var system = db.BeginSystemScope();
         var now = clock.GetUtcNow();
         await InsertUpcomingAsync(now, cancellationToken);
-        for (var index = 0; index < 25 && await DispatchChangeAsync(now, cancellationToken); index++) { }
         await CleanAbandonedAttachmentAsync(now, cancellationToken);
         if (!push.Enabled) return;
         await RetireInactiveDevicesAsync(now, cancellationToken);
         await QueuePushAsync(now, cancellationToken);
         for (var index = 0; index < 10 && await DispatchPushAsync(now, cancellationToken); index++) { }
+    }
+
+    public async Task ObserveBacklogAsync(CancellationToken cancellationToken)
+    {
+        using var system = db.BeginSystemScope();
+        var events = await db.WorkOrderEvents.LongCountAsync(row => row.DispatchedAt == null && row.FailedAt == null, cancellationToken);
+        var pushes = await db.PushDeliveries.LongCountAsync(row => row.CompletedAt == null, cancellationToken);
+        FieldOpsTelemetry.ObservePending(events, pushes);
     }
 
     private Task<int> RetireInactiveDevicesAsync(DateTimeOffset now, CancellationToken cancellationToken) =>
@@ -60,14 +83,17 @@ internal sealed class CollaborationDispatcher(FieldOpsDbContext db, IOrderChange
         db.ChangeTracker.Clear();
     }
 
-    private async Task<bool> DispatchChangeAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task<bool> DispatchChangeAsync(CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var batch = await db.WorkOrderEvents.FromSqlRaw("""
-            SELECT * FROM "WorkOrderEvents" WHERE "DispatchedAt" IS NULL
+        var claimTime = clock.GetUtcNow();
+        var batch = await db.WorkOrderEvents.FromSqlInterpolated($"""
+            SELECT * FROM "WorkOrderEvents" WHERE "DispatchedAt" IS NULL AND "FailedAt" IS NULL
+                AND ("NextAttemptAt" IS NULL OR "NextAttemptAt" <= {claimTime})
             ORDER BY "CreatedAt", "Id" LIMIT 1 FOR UPDATE SKIP LOCKED
             """).ToListAsync(cancellationToken);
         if (batch.SingleOrDefault() is not { } row) return false;
+        using var dispatch = FieldOpsTelemetry.StartDelivery(row.TraceParent);
         // Auth checks and dispatch share the lock used by assignment and membership writes.
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             SELECT 1 FROM "Organizations" WHERE "Id" = {row.TenantId} FOR UPDATE
@@ -85,12 +111,39 @@ internal sealed class CollaborationDispatcher(FieldOpsDbContext db, IOrderChange
                 ON CONFLICT DO NOTHING
                 """, cancellationToken);
         }
-        await realtime.DeliverAsync(row.TenantId, new(row.Id, row.WorkOrderId, row.Version, row.Kind), row.FormerAssignees, cancellationToken);
-        row.DispatchedAt = now;
+        using var deliveryDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deliveryDeadline.CancelAfter(TimeSpan.FromSeconds(3));
+        var outcome = "ok";
+        DateTimeOffset transitionedAt;
+        try
+        {
+            await realtime.DeliverAsync(row.TenantId, new(row.Id, row.WorkOrderId, row.Version, row.Kind), row.FormerAssignees, deliveryDeadline.Token);
+            transitionedAt = TransitionTime(row.CreatedAt, claimTime);
+            row.DispatchedAt = transitionedAt;
+        }
+        catch (Exception error) when (!cancellationToken.IsCancellationRequested)
+        {
+            transitionedAt = TransitionTime(row.CreatedAt, claimTime);
+            row.Attempts++;
+            if (row.Attempts >= 8) row.FailedAt = transitionedAt;
+            else row.NextAttemptAt = transitionedAt.AddSeconds(5 * Math.Pow(2, row.Attempts - 1));
+            outcome = row.FailedAt is null ? "retry" : "dead_letter";
+            dispatch?.SetStatus(ActivityStatusCode.Error);
+            logger.LogWarning("Outbox delivery {EventId} returned {Outcome} with {FailureType}", row.Id, outcome, error.GetType().Name);
+        }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        FieldOpsTelemetry.Record("outbox.dispatch", outcome, (transitionedAt - row.CreatedAt).TotalMilliseconds);
         db.ChangeTracker.Clear();
         return true;
+    }
+
+    private DateTimeOffset TransitionTime(DateTimeOffset createdAt, DateTimeOffset claimTime)
+    {
+        // Keep persisted timestamps monotonic if the application wall clock is corrected during delivery.
+        var earliest = createdAt > claimTime ? createdAt : claimTime;
+        var current = clock.GetUtcNow();
+        return current < earliest ? earliest : current;
     }
 
     private Task<int> InsertUpcomingAsync(DateTimeOffset now, CancellationToken cancellationToken) =>
@@ -168,6 +221,8 @@ internal sealed class CollaborationDispatcher(FieldOpsDbContext db, IOrderChange
 
     private async Task AttemptAsync(PushDelivery row, PushDevice device, DateTimeOffset now, CancellationToken cancellationToken)
     {
+        using var delivery = FieldOpsTelemetry.Activities.StartActivity("push.delivery", ActivityKind.Client);
+        var started = Stopwatch.GetTimestamp();
         var awaitingReceipt = row.TicketId is not null;
         PushResult result;
         try
@@ -190,6 +245,7 @@ internal sealed class CollaborationDispatcher(FieldOpsDbContext db, IOrderChange
             row.TicketId = result.TicketId;
             row.Outcome = null;
             row.DueAt = now.AddMinutes(15);
+            FieldOpsTelemetry.Record("push.delivery", "ticket", Stopwatch.GetElapsedTime(started).TotalMilliseconds);
             return;
         }
         var rotated = awaitingReceipt && device.TokenHash != row.TokenHash;
@@ -214,6 +270,9 @@ internal sealed class CollaborationDispatcher(FieldOpsDbContext db, IOrderChange
             row.CompletedAt = now;
         if (result.Error is not null)
             logger.LogWarning("Push delivery {DeliveryId} recorded {Outcome}", row.Id, row.Outcome);
+        var outcome = result.Error is null ? "ok" : row.CompletedAt is null ? "retry" : "failed";
+        FieldOpsTelemetry.Record("push.delivery", outcome, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        if (result.Error is not null) delivery?.SetStatus(ActivityStatusCode.Error);
     }
 }
 
@@ -221,19 +280,38 @@ internal sealed class CollaborationWorker(IServiceScopeFactory scopes, ILogger<C
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
-        while (await timer.WaitForNextTickAsync(stoppingToken))
+        var maintainedAt = Stopwatch.GetTimestamp();
+        var sampleBacklogAt = Stopwatch.GetTimestamp();
+        while (!stoppingToken.IsCancellationRequested)
         {
+            var delay = TimeSpan.FromMilliseconds(500);
+            using var activity = FieldOpsTelemetry.Activities.StartActivity("collaboration.worker");
             try
             {
                 await using var scope = scopes.CreateAsyncScope();
-                await scope.ServiceProvider.GetRequiredService<ICollaborationDispatcher>().DispatchAsync(stoppingToken);
+                var dispatcher = scope.ServiceProvider.GetRequiredService<CollaborationDispatcher>();
+                if (await dispatcher.DispatchChangesAsync(stoppingToken)) delay = TimeSpan.FromMilliseconds(50);
+                if (Stopwatch.GetElapsedTime(maintainedAt) >= TimeSpan.FromSeconds(3))
+                {
+                    await dispatcher.MaintainAsync(stoppingToken);
+                    maintainedAt = Stopwatch.GetTimestamp();
+                }
+                if (Stopwatch.GetElapsedTime(sampleBacklogAt) >= TimeSpan.FromSeconds(30))
+                {
+                    await dispatcher.ObserveBacklogAsync(stoppingToken);
+                    sampleBacklogAt = Stopwatch.GetTimestamp();
+                }
+                FieldOpsTelemetry.Record("collaboration.worker", "ok");
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception error)
             {
+                delay = TimeSpan.FromSeconds(3);
+                activity?.SetStatus(ActivityStatusCode.Error);
+                FieldOpsTelemetry.Record("collaboration.worker", "failed");
                 logger.LogWarning("Collaboration dispatch failed with {FailureType}", error.GetType().Name);
             }
+            await Task.Delay(delay, stoppingToken);
         }
     }
 }

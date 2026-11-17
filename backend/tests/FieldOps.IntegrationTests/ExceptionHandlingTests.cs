@@ -37,7 +37,8 @@ public sealed class ExceptionHandlingTests
         Assert.True(response.Headers.Contains("X-Correlation-ID"));
         Assert.Equal(Assert.Single(response.Headers.GetValues("X-Correlation-ID")),
             problem.RootElement.GetProperty("traceId").GetString());
-        Assert.Contains(logs, message => message.Contains("HTTP GET completed 500", StringComparison.Ordinal));
+        Assert.Contains(logs, message => message.Contains("http GET /{**path} returned 500", StringComparison.Ordinal) &&
+            message.Contains(" with failed", StringComparison.Ordinal));
         Assert.DoesNotContain(logs, message => message.Contains(ThrowingNotFoundWriter.Secret, StringComparison.Ordinal));
     }
 

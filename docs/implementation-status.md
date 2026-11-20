@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 2026-11-16 (Europe/Istanbul).
+Last updated: 2026-11-20 (Europe/Istanbul).
 
 ## Authorization boundary
 
@@ -30,7 +30,7 @@ The revalidation superseded the historical first-run table below. The audit reco
 | 4 | Implemented, native validation deferred | Technician mobile workflows |
 | 5 | Implemented, native validation deferred | Offline-first synchronization |
 | 6 | Complete, native validation deferred | Real-time, notifications, attachments, scheduling, analytics |
-| 7 | Not Started | Quality and hardening |
+| 7 | Implemented, hosted CI recheck pending | Quality and hardening |
 | 8 | Not Started | Portfolio and release preparation |
 
 ## Phase 0 — Foundation and architecture
@@ -256,7 +256,10 @@ Phase 3 was subsequently authorized and implemented against these APIs. [Phase 2
 - The independent audit reported security PASS, observability and reliability FAIL, performance CONDITIONAL and Phase 8 NOT READY. Remediation adds separate upgrade/lifetime metrics, fresh dispatch timestamps, bounded download and readiness responses, a guarded migration downgrade and faster bounded dispatch. It also addresses Edge fixture synchronization and the checklist checkbox race observed during regression testing. [Quality gate remediation](phase-7-quality-gate-remediation.md)
 - Remediation verification passed 266 backend tests, live OTLP, repeated PostgreSQL readiness and isolated restore checks, and the real MinIO streaming/drain drills. SignalR burst p95 went from 5,334.21 ms to 487.36 ms for the matched 160-event run. The two targeted Edge regressions passed, with full Edge verification tracked in the remediation report.
 - The independent re-audit closed P7-01, P7-02, P7-03, P7-05, P7-06 and P7-07. Final remediation resolved P7-04 by arming the existing HTTP budget before routing. It passed two full runs of 267 backend tests, all 17 Edge scenarios and 62 web Vitest cases. P7-09 resolved after updating six published Expo SDK 58 patch releases. A clean install passed Expo compatibility, Doctor 20/20, Android/iOS JavaScript exports and Metro smoke, plus 70 mobile Vitest, 25 Jest and 10 live API integration tests.
-- **P7-08: BLOCKED. DEPENDENCY SECURITY GATE: FAIL. INDEPENDENT RE-AUDIT READINESS: NOT READY. PHASE 8 READINESS: NOT READY.** On 2026-11-18, the GitHub advisory and npm registry still showed no published fix for either installed picomatch version. Full and production-classified audits each exited 1, as did the local run of the exact CI audit command. Fresh inventories found zero affected modules across 447 web modules, 1,357 Android sources and 1,363 iOS sources. Node build and test tooling remains affected. No exception is in effect. [P7-08 decision report](phase-7-picomatch-decision.md) · [Final quality gate remediation](phase-7-final-quality-gate-remediation.md)
+- **P7-08: RESOLVED. DEPENDENCY SECURITY GATE: PASS locally.** On 2026-11-20 the official advisory/API confirmed withdrawal on 2026-11-18 and an update on 2026-11-19. The existing `npm audit --audit-level=high` command exited 0. Full and production-classified audits contain zero High/Critical findings and respectively 30 and 3 Moderate entries, with exit 1 for those Moderate findings. The withdrawn advisory is absent. Dependency files and the audit gate were preserved. [Current CI remediation](phase-7-hosted-ci-remediation.md) · [Historical P7-08 decision](phase-7-picomatch-decision.md)
+- Hosted run `44193183423` failed the web audit before the withdrawal and finished the Docker browser suite 16/17 after healthy services and successful migration/authentication smoke. Its checklist test held the newest event while an older event could refetch the newer order version and cause a local conflict with no Pause POST. The local diagnostic reproduced that timeout. The fixture now gates detail reads during the real API 409 and verifies draft preservation, explicit Reload and versioned Pause recovery. Verification passed the isolated checklist, six related scenarios, two independent full Edge runs of **17/17** (4.0 and 4.1 minutes, zero retries/skips), **62 web Vitest tests**, lint, strict typecheck, formatting and production build. The isolated Compose project passed readiness, migration reapply, normal-limit trusted HTTPS/CORS/CSRF/SMTP/429 smoke and **10 mobile HTTP integration tests**. Original hosted trace/screenshot files were not uploaded and are unavailable. [Current evidence](phase-7-hosted-ci-remediation.md)
+- **WEB CI: BLOCKED pending hosted recheck. DOCKER CI: BLOCKED pending hosted recheck. PHASE 7 HOSTED CI RECHECK READINESS: READY.** Local verification is complete. The last hosted web and Docker jobs remain failed until a new run evaluates the correction.
+- **PHASE 8 READINESS: NOT READY.** A new hosted run and the independent Phase 7 decision remain pending.
 
 ## Phase 8 — Portfolio and release preparation
 

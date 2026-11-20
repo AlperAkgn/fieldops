@@ -1380,27 +1380,45 @@ test('checklist writes synchronize fast actions, preserve real conflicts and rec
       .filter((write) => write.path.includes('/checklist/') && !write.path.endsWith('/apply'))
       .map((write) => write.expectedVersion),
   ).toEqual([5, 6, 7]);
+  // An earlier committed event can arrive after the owner makes the next change.
+  const forwardStartChange = live.hold(order, 9);
   await start.click();
   await page.getByRole('button', { name: 'Confirm start' }).click();
   await expect(page.locator('.page-header .badge')).toHaveText('In Progress');
   expect(writes.find((write) => write.path.endsWith('/start'))?.expectedVersion).toBe(8);
   await page.getByRole('button', { name: 'Pause work order', exact: true }).click();
+  const pauseDialog = page.getByRole('dialog', { name: 'Pause work order?' });
+  await pauseDialog.getByLabel('Reason', { exact: true }).fill('Pause draft must survive');
   const forwardOwnerChange = live.hold(order, 10);
-  await call(
-    `/work-orders/${order.id}`,
-    { expectedVersion: 9, description: 'Changed by organization owner' },
-    owner,
-    'PATCH',
-  );
-  const rejected = page.waitForResponse(
-    (response) =>
-      response.url().endsWith(`/work-orders/${order.id}/pause`) &&
-      response.request().method() === 'POST',
-  );
-  await page.getByRole('button', { name: 'Confirm pause' }).click();
-  expect((await rejected).status()).toBe(409);
-  await expect(page.getByRole('dialog').getByRole('alert')).toContainText(/changed|version/i);
-  expect(writes.filter((write) => write.path.endsWith('/pause'))).toHaveLength(1);
+  // Keep every detail refresh behind the conflict, including one triggered by the older event.
+  defer();
+  try {
+    await call(
+      `/work-orders/${order.id}`,
+      { expectedVersion: 9, description: 'Changed by organization owner' },
+      owner,
+      'PATCH',
+    );
+    await forwardStartChange();
+    await expect.poll(() => waiting).toBe(true);
+    await expect(page.getByText(/Version 9/)).toBeVisible();
+    const rejected = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/work-orders/${order.id}/pause`) &&
+        response.request().method() === 'POST',
+    );
+    await expect(pauseDialog.getByRole('button', { name: 'Confirm pause' })).toBeEnabled();
+    await pauseDialog.getByRole('button', { name: 'Confirm pause' }).click();
+    expect((await rejected).status()).toBe(409);
+    await expect(pauseDialog.getByRole('alert')).toContainText(/changed|version/i);
+    await expect(pauseDialog.getByLabel('Reason', { exact: true })).toHaveValue(
+      'Pause draft must survive',
+    );
+    expect(writes.filter((write) => write.path.endsWith('/pause'))).toHaveLength(1);
+  } finally {
+    hold = false;
+    release();
+  }
   await page.getByRole('button', { name: 'Reload current work order' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByText(/Version 10/)).toBeVisible();

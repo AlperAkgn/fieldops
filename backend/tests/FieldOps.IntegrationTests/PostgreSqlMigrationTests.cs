@@ -135,4 +135,42 @@ public sealed class PostgreSqlMigrationTests
         using var afterMigration = await client.GetAsync("/health/ready");
         Assert.Equal(HttpStatusCode.OK, afterMigration.StatusCode);
     }
+
+    [Fact]
+    [Trait("Category", "Database")]
+    public async Task ReadinessRemainsAvailableWhileRequestPoolIsExhaustedAndThenRecovers()
+    {
+        await using var testDatabase = await TestDatabase.CreateAsync();
+        var connection = new NpgsqlConnectionStringBuilder(testDatabase.ConnectionString)
+        {
+            Pooling = true,
+            MaxPoolSize = 1,
+            Timeout = 1
+        };
+        await using var factory = new ApiFactory(connectionString: connection.ConnectionString);
+        using var client = factory.CreateClient();
+        await using var scope = factory.Services.CreateAsyncScope();
+        var owner = scope.ServiceProvider.GetRequiredService<FieldOpsDbContext>();
+        await owner.Database.MigrateAsync();
+        await owner.Database.OpenConnectionAsync();
+        try
+        {
+            await using var waitingScope = factory.Services.CreateAsyncScope();
+            var waiting = waitingScope.ServiceProvider.GetRequiredService<FieldOpsDbContext>();
+            var exhausted = await Assert.ThrowsAsync<InvalidOperationException>(() => waiting.Database.OpenConnectionAsync());
+            var driverError = Assert.IsType<NpgsqlException>(exhausted.InnerException);
+            Assert.Contains("connection pool has been exhausted", driverError.Message, StringComparison.OrdinalIgnoreCase);
+
+            using var ready = await client.GetAsync("/health/ready");
+            Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
+        }
+        finally { await owner.Database.CloseConnectionAsync(); }
+
+        await using var recoveredScope = factory.Services.CreateAsyncScope();
+        var recovered = recoveredScope.ServiceProvider.GetRequiredService<FieldOpsDbContext>();
+        await recovered.Database.OpenConnectionAsync();
+        await recovered.Database.CloseConnectionAsync();
+        using var afterRecovery = await client.GetAsync("/health/ready");
+        Assert.Equal(HttpStatusCode.OK, afterRecovery.StatusCode);
+    }
 }

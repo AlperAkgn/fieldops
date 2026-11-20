@@ -12,6 +12,40 @@ namespace FieldOps.IntegrationTests;
 public sealed class OfflineSyncTests : CoreOperationsTestBase
 {
     [Fact]
+    public async Task BatchedPullReturnsEachOrdersLatestVisibleNotesAndCurrentChecklistVersion()
+    {
+        var owner = await RegisterAsync();
+        var technician = await JoinAsync(owner, await RegisterAsync(), OrganizationRole.Technician);
+        var catalog = await CatalogAsync(owner.Tokens);
+        var first = await AssignAsync(owner.Tokens, await ScheduleAsync(owner.Tokens,
+            await OrderAsync(owner.Tokens, catalog)), technician.UserId);
+        var second = await AssignAsync(owner.Tokens, await ScheduleAsync(owner.Tokens,
+            await OrderAsync(owner.Tokens, catalog), "2027-01-10T11:00:00Z", "2027-01-10T12:00:00Z"), technician.UserId);
+        var version = Version(first);
+        for (var index = 0; index < 13; index++)
+        {
+            var note = await CallAsync(HttpMethod.Post, $"/work-orders/{Id(first)}/comments", owner.Tokens, new
+            {
+                expectedVersion = version,
+                body = $"Service note {index}",
+                visibility = index == 12 ? "Internal" : "TechnicianVisible"
+            }, HttpStatusCode.Created);
+            version = note["workOrderVersion"]!.GetValue<long>();
+        }
+
+        var snapshot = await CallAsync(HttpMethod.Get, "/sync/pull?protocol=1", technician);
+        var orders = snapshot["orders"]!.AsArray();
+        Assert.Equal(2, orders.Count);
+        var firstRow = Assert.Single(orders, row => Id(row!["order"]!) == Id(first))!;
+        var notes = firstRow["notes"]!.AsArray();
+        Assert.Equal(Enumerable.Range(2, 10).Reverse().Select(index => $"Service note {index}"),
+            notes.Select(note => note!["body"]!.GetValue<string>()));
+        Assert.Equal(version, firstRow["checklist"]!["workOrderVersion"]!.GetValue<long>());
+        var secondRow = Assert.Single(orders, row => Id(row!["order"]!) == Id(second))!;
+        Assert.Empty(secondRow["notes"]!.AsArray());
+    }
+
+    [Fact]
     public async Task ConcurrentReplayWritesOneNoteAndChecksFingerprintAndAuthorization()
     {
         var owner = await RegisterAsync();

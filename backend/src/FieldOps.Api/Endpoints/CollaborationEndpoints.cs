@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FieldOps.Api.Collaboration;
 using FieldOps.Application.Collaboration;
 using FieldOps.Application.Common;
@@ -48,12 +49,50 @@ public static class CollaborationEndpoints
             var result = await attachments.UploadAsync(id, uploadId, fileName, http.Request.ContentType, http.Request.Body, ct);
             return TypedResults.Created($"/api/v1/work-orders/{id}/attachments/{result.Id}", result);
         }).RequireAuthorization("WorkOrderExecute");
-        files.MapGet("/{attachmentId:guid}", async (Guid id, Guid attachmentId, HttpContext http, IAttachments attachments, CancellationToken ct) =>
+        files.MapGet("/{attachmentId:guid}", WriteDownloadAsync).Produces(StatusCodes.Status200OK);
+    }
+
+    private static async Task WriteDownloadAsync(Guid id, Guid attachmentId, HttpContext http, IAttachments attachments,
+        ILoggerFactory loggerFactory, CancellationToken cancellationToken)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(8));
+        var started = Stopwatch.GetTimestamp();
+        var outcome = "failed";
+        try
         {
-            var content = await attachments.DownloadAsync(id, attachmentId, ct);
-            http.Response.RegisterForDispose(content);
-            http.Response.Headers.XContentTypeOptions = "nosniff";
-            return TypedResults.File(content.Stream, content.Attachment.ContentType, content.Attachment.FileName);
-        });
+            using var content = await attachments.DownloadAsync(id, attachmentId, deadline.Token);
+            http.Response.ContentLength = content.Attachment.Size;
+            await TypedResults.Stream(destination => content.Stream.CopyToAsync(destination, deadline.Token),
+                content.Attachment.ContentType, content.Attachment.FileName).ExecuteAsync(http);
+            outcome = "ok";
+        }
+        catch (FieldOpsException error)
+        {
+            outcome = error.Kind == ErrorKind.Unavailable ? "failed" : "rejected";
+            throw;
+        }
+        catch (Exception error) when (error is OperationCanceledException or IOException or HttpRequestException)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                outcome = "cancelled";
+                return;
+            }
+            outcome = deadline.IsCancellationRequested ? "timeout" : "failed";
+            loggerFactory.CreateLogger(FieldOpsTelemetry.Name).LogWarning("Attachment download ended with {Outcome} ({FailureType})",
+                outcome, error.GetType().Name);
+            if (!http.Response.HasStarted)
+            {
+                http.Response.Clear();
+                throw new FieldOpsException(ErrorKind.Unavailable, "object_storage_unavailable", "File storage is temporarily unavailable.");
+            }
+            // Once headers and bytes went out, fail the transport so callers cannot accept a partial file.
+            http.Abort();
+        }
+        finally
+        {
+            FieldOpsTelemetry.Record("storage.download", outcome, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        }
     }
 }

@@ -18,7 +18,8 @@ public sealed partial class FieldOpsDbContext
         changes.HasKey(row => row.Id);
         changes.Property(row => row.Kind).HasMaxLength(64);
         changes.HasIndex(row => new { row.TenantId, row.WorkOrderId, row.Version });
-        changes.HasIndex(row => new { row.CreatedAt, row.Id }).HasFilter("\"DispatchedAt\" IS NULL");
+        changes.HasIndex(row => new { row.CreatedAt, row.Id }).HasFilter("\"DispatchedAt\" IS NULL AND \"FailedAt\" IS NULL");
+        changes.Property(row => row.TraceParent).HasMaxLength(55);
         changes.HasQueryFilter(row => IsSystemScope || row.TenantId == CurrentTenantId);
         changes.HasOne<WorkOrder>().WithMany().HasForeignKey(row => new { row.TenantId, Id = row.WorkOrderId })
             .HasPrincipalKey(row => new { row.TenantId, row.Id }).OnDelete(DeleteBehavior.Restrict);
@@ -61,6 +62,10 @@ public sealed partial class FieldOpsDbContext
 internal sealed record WorkOrderEvent(Guid Id, Guid TenantId, Guid WorkOrderId, long Version, string Kind,
     DateTimeOffset CreatedAt, Guid[] FormerAssignees) : ITenantEntity
 {
+    public string? TraceParent { get; init; }
+    public int Attempts { get; set; }
+    public DateTimeOffset? NextAttemptAt { get; set; }
+    public DateTimeOffset? FailedAt { get; set; }
     public DateTimeOffset? DispatchedAt { get; set; }
 }
 

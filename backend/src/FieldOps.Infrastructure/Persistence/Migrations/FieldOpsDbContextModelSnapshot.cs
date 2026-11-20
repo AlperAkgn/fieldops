@@ -1361,10 +1361,16 @@ namespace FieldOps.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset?>("DispatchedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("FailedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.PrimitiveCollection<Guid[]>("FormerAssignees")
@@ -1376,8 +1382,15 @@ namespace FieldOps.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("TraceParent")
+                        .HasMaxLength(55)
+                        .HasColumnType("character varying(55)");
 
                     b.Property<long>("Version")
                         .HasColumnType("bigint");
@@ -1388,7 +1401,7 @@ namespace FieldOps.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedAt", "Id")
-                        .HasFilter("\"DispatchedAt\" IS NULL");
+                        .HasFilter("\"DispatchedAt\" IS NULL AND \"FailedAt\" IS NULL");
 
                     b.HasIndex("TenantId", "WorkOrderId", "Version");
 

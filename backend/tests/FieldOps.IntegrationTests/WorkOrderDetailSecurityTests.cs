@@ -116,7 +116,8 @@ public sealed class WorkOrderDetailSecurityTests : CoreOperationsTestBase
             await Assert.ThrowsAsync<NotSupportedException>(() => context.GetService<IMigrator>().MigrateAsync(previous));
             Assert.Collection(await context.Database.GetPendingMigrationsAsync(),
                 pending => Assert.EndsWith("_OfflineSynchronization", pending, StringComparison.Ordinal),
-                pending => Assert.EndsWith("_CollaborationAndAttachments", pending, StringComparison.Ordinal));
+                pending => Assert.EndsWith("_CollaborationAndAttachments", pending, StringComparison.Ordinal),
+                pending => Assert.EndsWith("_Phase7OutboxReliability", pending, StringComparison.Ordinal));
             Assert.Equal(1, await context.WorkOrders.IgnoreQueryFilters().CountAsync());
             Assert.Equal(1, await context.Customers.IgnoreQueryFilters().CountAsync());
             Assert.True(await context.AuditLogs.IgnoreQueryFilters().CountAsync() >= 5);

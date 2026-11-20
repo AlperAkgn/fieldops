@@ -320,7 +320,7 @@ export function WorkOrderDetailPage() {
     );
   const { order, customer, serviceLocation, asset, assignments } = query.data;
   const openDialog = (name: string) => {
-    if (name === 'edit' ? action.writing : action.busy) return;
+    if (action.writing) return;
     setSnapshot(order);
     setDialog(name);
     action.reset();
@@ -439,7 +439,7 @@ export function WorkOrderDetailPage() {
             {manage && ['Draft', 'Scheduled', 'Assigned'].includes(order.status) && (
               <button
                 className="btn secondary wide"
-                disabled={action.busy}
+                disabled={action.writing}
                 onClick={() => openDialog('schedule')}
               >
                 Schedule work order
@@ -471,7 +471,7 @@ export function WorkOrderDetailPage() {
             {manage && ['Scheduled', 'Assigned'].includes(order.status) && (
               <button
                 className="btn secondary wide"
-                disabled={action.busy}
+                disabled={action.writing}
                 onClick={() => openDialog('assign')}
               >
                 Assign technicians
@@ -485,7 +485,7 @@ export function WorkOrderDetailPage() {
                   <button
                     className={`btn ${name === 'cancel' ? 'danger' : 'primary'}`}
                     key={name}
-                    disabled={action.busy}
+                    disabled={action.writing}
                     onClick={() => openDialog(name)}
                   >
                     <CheckCircle2 size={16} />
@@ -557,7 +557,7 @@ export function WorkOrderDetailPage() {
               })
             }
             error={undefined}
-            pending={action.busy}
+            pending={action.writing}
             submitLabel={`Confirm ${dialog}`}
           />
           <WorkOrderError error={action.error} reload={reload} />

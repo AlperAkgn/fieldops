@@ -4,6 +4,7 @@ using FieldOps.Api.Endpoints;
 using FieldOps.Api.Collaboration;
 using FieldOps.Application.Collaboration;
 using FieldOps.Api.Errors;
+using FieldOps.Api.Diagnostics;
 using FieldOps.Api.Health;
 using FieldOps.Api.Security;
 using FieldOps.Infrastructure;
@@ -17,7 +18,17 @@ var migrate = args.Contains("--migrate", StringComparer.Ordinal);
 var builder = WebApplication.CreateBuilder(args.Where(argument => argument != "--migrate").ToArray());
 
 builder.Logging.ClearProviders();
-builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
+builder.Logging.AddJsonConsole(options =>
+{
+    options.IncludeScopes = true;
+    options.UseUtcTimestamp = true;
+    options.TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.fff'Z'";
+});
+// The hosting scope includes a raw request path. Request telemetry uses the matched template instead.
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.None);
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.None);
+builder.Logging.AddFilter("Microsoft.AspNetCore.SignalR", LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.AspNetCore.Http.Connections", LogLevel.Warning);
 builder.Services.AddProblemDetails(options =>
     options.CustomizeProblemDetails = context =>
         context.ProblemDetails.Extensions["traceId"] =
@@ -65,8 +76,10 @@ if (string.IsNullOrWhiteSpace(connectionString))
         "Configure ConnectionStrings__Database using environment variables or .NET user secrets.");
 }
 
+var useTrustedProxy = DeploymentSecurity.Configure(builder, connectionString, migrate);
 builder.Services.AddInfrastructure(connectionString, builder.Configuration);
 if (!migrate) builder.Services.AddApiSecurity(builder.Configuration);
+if (!migrate) builder.AddFieldOpsTelemetry();
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<WorkOrderConnections>();
 builder.Services.AddScoped<IOrderChangeDelivery, SignalROrderDelivery>();
@@ -84,25 +97,12 @@ if (migrate)
     return;
 }
 
-app.Use(async (context, next) =>
-{
-    var correlationId = Activity.Current?.TraceId.ToString() ?? context.TraceIdentifier;
-    context.Response.OnStarting(() =>
-    {
-        context.Response.Headers["X-Correlation-ID"] = correlationId;
-        return Task.CompletedTask;
-    });
-    using var scope = app.Logger.BeginScope(new Dictionary<string, object>
-    {
-        ["RequestId"] = context.TraceIdentifier,
-        ["CorrelationId"] = correlationId
-    });
-
-    var startedAt = Stopwatch.GetTimestamp();
-    await next(context);
-    app.Logger.LogInformation("HTTP {Method} completed {Result} in {Duration} ms",
-        context.Request.Method, context.Response.StatusCode, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
-});
+app.Use(ReadinessDeadline.StartAsync);
+if (useTrustedProxy) app.UseForwardedHeaders();
+if (!app.Environment.IsDevelopment()) app.UseHsts();
+app.Use(DeploymentSecurity.ApplyResponseHeaders);
+app.UseRouting();
+app.Use(ApiTelemetry.TrackRequestAsync);
 
 app.UseExceptionHandler();
 app.UseStatusCodePages(async context =>
@@ -159,11 +159,7 @@ app.MapGet("/health/live", async (HttpContext context, HealthCheckService health
     .WithSummary("Reports whether the API process can answer requests.")
     .Produces<HealthResponse>().AllowAnonymous();
 
-app.MapGet("/health/ready", async (HttpContext context, HealthCheckService healthChecks) =>
-{
-    var report = await healthChecks.CheckHealthAsync(check => check.Tags.Contains("ready"), context.RequestAborted);
-    await HealthResponseWriter.WriteAsync(context, report);
-})
+app.MapGet("/health/ready", ReadinessDeadline.WriteResponseAsync)
     .WithName("GetReadiness")
     .WithTags("Health")
     .WithSummary("Checks PostgreSQL connectivity and that all migrations are applied.")

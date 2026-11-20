@@ -60,26 +60,27 @@ internal sealed class WorkOrderService(FieldOpsDbContext database, OperationalWr
     public async Task<WorkOrderDetailDto> GetAsync(Guid id, CancellationToken cancellationToken)
     {
         var actor = writes.Actor;
-        var order = await WorkOrderAccess.VisibleTo(database, actor).AsNoTracking().Where(order => order.Id == id)
-            .Select(Projection).SingleOrDefaultAsync(cancellationToken) ?? throw WorkOrderAccess.NotFound();
-        var customer = await database.Customers.Where(customer => customer.TenantId == actor.TenantId && customer.Id == order.CustomerId)
-            .Select(customer => new WorkOrderCustomerDto(customer.Id, customer.Name)).SingleAsync(cancellationToken);
-        var location = await database.ServiceLocations.Where(location => location.TenantId == actor.TenantId && location.Id == order.ServiceLocationId)
-            .Select(location => new WorkOrderLocationDto(location.Id, location.Name, location.AddressLine, location.City, location.StateOrProvince,
-                location.Country, location.PostalCode, location.Latitude, location.Longitude, location.ContactName, location.ContactPhone))
-            .SingleAsync(cancellationToken);
-        var asset = order.AssetId is { } assetId
-            ? await database.Assets.Where(asset => asset.TenantId == actor.TenantId && asset.Id == assetId)
-                .Select(asset => new WorkOrderAssetDto(asset.Id, asset.AssetCode, asset.Name, asset.Brand, asset.Model, asset.SerialNumber))
-                .SingleAsync(cancellationToken)
-            : null;
+        var visible = WorkOrderAccess.VisibleTo(database, actor).AsNoTracking().Where(order => order.Id == id);
+        var detail = await (from order in visible
+                            join customer in database.Customers.Where(row => row.TenantId == actor.TenantId) on order.CustomerId equals customer.Id
+                            join location in database.ServiceLocations.Where(row => row.TenantId == actor.TenantId) on order.ServiceLocationId equals location.Id
+                            join asset in database.Assets.Where(row => row.TenantId == actor.TenantId) on order.AssetId equals asset.Id into optionalAsset
+                            from asset in optionalAsset.DefaultIfEmpty()
+                            select new
+                            {
+                                Order = order,
+                                Customer = new WorkOrderCustomerDto(customer.Id, customer.Name),
+                                Location = new WorkOrderLocationDto(location.Id, location.Name, location.AddressLine, location.City, location.StateOrProvince,
+                                    location.Country, location.PostalCode, location.Latitude, location.Longitude, location.ContactName, location.ContactPhone),
+                                Asset = asset == null ? null : new WorkOrderAssetDto(asset.Id, asset.AssetCode, asset.Name, asset.Brand, asset.Model, asset.SerialNumber)
+                            }).SingleOrDefaultAsync(cancellationToken) ?? throw WorkOrderAccess.NotFound();
         var assignments = await (from assignment in ActiveAssignments(id, actor.TenantId)
                                  join user in database.Users on assignment.TechnicianUserId equals user.Id
                                  orderby assignment.IsPrimary descending, assignment.AssignedAt, assignment.Id
                                  select new WorkOrderAssignmentDto(assignment.Id, user.Id, user.DisplayName,
                                      assignment.IsPrimary, assignment.AssignedByUserId, assignment.AssignedAt))
             .ToListAsync(cancellationToken);
-        return new WorkOrderDetailDto(order, customer, location, asset, assignments);
+        return new WorkOrderDetailDto(ToDto(detail.Order), detail.Customer, detail.Location, detail.Asset, assignments);
     }
 
     public async Task<PageResult<WorkOrderHistoryDto>> HistoryAsync(Guid id, PageRequest page, CancellationToken cancellationToken)

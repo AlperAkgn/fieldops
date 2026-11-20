@@ -108,6 +108,8 @@ Customer DELETE means archive, retaining service history. Define archive visibil
 
 ## Migration and test policy
 
+Phase 7 adds persistent collaboration delivery attempts, next-attempt and terminal-failure timestamps, and optional W3C trace correlation. The existing pending-events index excludes terminal rows. The migration preserves work orders, audit and delivery history. Its index replacement takes a PostgreSQL table lock. Schedule the migration for an approved window on a populated hosted database and keep an independently tested backup. [Operations and recovery](operations.md)
+
 Phase 6 migration `20261114123641_CollaborationAndAttachments` adds work-order events, inbox notifications, push devices, push delivery attempts, and attachment metadata. The event outbox uses the existing work-order transaction and audit. Attachment reservations stay hidden until object storage confirms the write. Downgrade refuses to remove attachment, inbox or push-device records. SQLite schema 2 adds the workspace time zone to the Phase 5 sync state and keeps the existing order cache and queued edits.
 
 Phase 5 migration `20261113203829_OfflineSynchronization` creates `SyncReceipts`, `SyncWorkOrderChanges` and `SyncWatermarks`. Receipt keys include tenant/user/operation and composite tenant foreign keys. A transactional trigger maintains the tenant watermark and latest work-order position. The migration locks work-order writes during backfill and preserves prior versions and audit rows. Downgrade refuses to remove committed receipts. [Cursor and retention details](offline-sync.md#push-and-pull)

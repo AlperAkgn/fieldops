@@ -56,6 +56,7 @@ internal sealed class SyncService(FieldOpsDbContext database, OperationalWriteCo
             }
 
             results.Add(result);
+            FieldOpsTelemetry.Record("sync.command", result.Status);
             if (result.Status != "applied") blocked.Add(operation.OrderId);
         }
         return new SyncPushResponse(results);
@@ -140,13 +141,36 @@ internal sealed class SyncService(FieldOpsDbContext database, OperationalWriteCo
                           orderby change.Position
                           select new { Order = order, change.Position }).Take(PageSize + 1).ToListAsync(cancellationToken);
         var more = page.Count > PageSize;
-        var result = new List<SyncOrder>();
-        foreach (var row in page.Take(PageSize))
-        {
-            var checklist = await details.GetChecklistAsync(row.Order.Id, cancellationToken);
-            var notes = await details.ListCommentsAsync(row.Order.Id, new PageRequest(1, 10), cancellationToken);
-            result.Add(new(WorkOrderService.ToDto(row.Order), checklist, notes.Items));
-        }
+        var ids = page.Take(PageSize).Select(row => row.Order.Id).ToArray();
+        // Load only the current page of authorized IDs under the existing repeatable-read snapshot.
+        var items = await database.WorkOrderChecklistItems.AsNoTracking()
+            .Where(item => item.TenantId == actor.TenantId && ids.Contains(item.WorkOrderId))
+            .OrderBy(item => item.Position).ThenBy(item => item.Id)
+            .Select(item => new
+            {
+                item.WorkOrderId,
+                Item = new WorkOrderChecklistItemDto(item.Id, item.SourceTemplateId, item.SourceTemplateVersion,
+                    item.SourceTemplateItemId, item.Label, item.Position, item.IsRequired, item.IsCompleted,
+                    item.CompletedByUserId, item.CompletedAt)
+            }).ToListAsync(cancellationToken);
+        var notes = await (from order in visible.Where(order => ids.Contains(order.Id))
+                           from comment in database.WorkOrderComments.AsNoTracking()
+                               .Where(comment => comment.TenantId == order.TenantId && comment.WorkOrderId == order.Id &&
+                                   comment.Visibility == CommentVisibility.TechnicianVisible)
+                               .OrderByDescending(comment => comment.CreatedAt).ThenByDescending(comment => comment.Id).Take(10)
+                           join user in database.Users.AsNoTracking() on comment.AuthorUserId equals user.Id
+                           orderby comment.CreatedAt descending, comment.Id descending
+                           select new
+                           {
+                               comment.WorkOrderId,
+                               Note = new WorkOrderCommentDto(comment.Id, comment.AuthorUserId, user.DisplayName, comment.Body,
+                                   comment.Visibility, comment.CreatedAt)
+                           }).ToListAsync(cancellationToken);
+        var orderItems = items.ToLookup(row => row.WorkOrderId, row => row.Item);
+        var orderNotes = notes.ToLookup(row => row.WorkOrderId, row => row.Note);
+        var result = page.Take(PageSize).Select(row => new SyncOrder(WorkOrderService.ToDto(row.Order),
+            WorkOrderDetailService.ToChecklist(row.Order.Id, row.Order.Version, orderItems[row.Order.Id].ToArray()),
+            orderNotes[row.Order.Id].ToArray())).ToList();
         var position = more ? page[PageSize - 1].Position : watermark;
         var next = cursorProtector.Protect(JsonSerializer.Serialize(
             new CursorState(actor.TenantId, actor.UserId, actor.SessionId, authorization, position, now)));

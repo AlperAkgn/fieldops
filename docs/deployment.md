@@ -4,6 +4,8 @@
 
 The local stack runs the FieldOps API, PostgreSQL, Mailpit, and MinIO. The admin web and Expo development server run on the host.
 
+See [FieldOps operations and recovery](operations.md) for hosted configuration, optional OTLP export, the isolated benchmarks, and recovery guidance.
+
 ## Prerequisites
 
 - A current .NET 10.0.4xx SDK patch, minimum 10.0.401 (see `global.json`), Docker Engine with Compose v2, Node 24.21.0, and npm 11.x. Docker/CI use SDK 10.0.403; the API container uses runtime 10.0.14.

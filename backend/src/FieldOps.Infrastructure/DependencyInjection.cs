@@ -32,11 +32,12 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, string connectionString, IConfiguration? configuration = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-
-        services.AddDbContext<FieldOpsDbContext>(options =>
-            options.UseNpgsql(connectionString, database => database.CommandTimeout(5)));
+        services.AddSingleton<DatabaseTelemetry>();
+        services.AddDbContext<FieldOpsDbContext>((provider, options) =>
+            options.UseNpgsql(connectionString, database => database.CommandTimeout(5))
+                .AddInterceptors(provider.GetRequiredService<DatabaseTelemetry>()));
         services.AddHealthChecks().AddCheck<PostgreSqlReadinessCheck>(
-            "postgresql", tags: ["ready"], timeout: TimeSpan.FromSeconds(5));
+            PostgreSqlReadinessCheck.Name, tags: ["ready"], timeout: TimeSpan.FromSeconds(4));
         services.TryAddScoped<TenantContext>();
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<OperationalWriteContext>();
@@ -54,7 +55,8 @@ public static class DependencyInjection
         services.AddScoped<INotifications>(provider => provider.GetRequiredService<CollaborationService>());
         services.AddScoped<IAttachments, AttachmentService>();
         services.AddSingleton<IAttachmentStorage, S3AttachmentStorage>();
-        services.AddScoped<ICollaborationDispatcher, CollaborationDispatcher>();
+        services.AddScoped<CollaborationDispatcher>();
+        services.AddScoped<ICollaborationDispatcher>(provider => provider.GetRequiredService<CollaborationDispatcher>());
         services.AddHttpClient<IPushProvider, ExpoPushProvider>(client => client.Timeout = TimeSpan.FromSeconds(4));
         services.AddHostedService<CollaborationWorker>();
         if (configuration is not null) services.AddIdentityInfrastructure(configuration);

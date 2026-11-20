@@ -42,6 +42,13 @@ internal sealed class ApiFactory(string environment = "Development", string? con
             ["Email:FromAddress"] = "tests@example.test",
             ["Email:UseStartTls"] = "false"
         };
+        if (environment != "Development")
+        {
+            configurationValues["ConnectionStrings:Database"] += ";SSL Mode=VerifyFull";
+            configurationValues["AllowedHosts"] = "localhost";
+            configurationValues["Email:UseStartTls"] = "true";
+            configurationValues["DataProtection:KeyPath"] = Path.Combine(Path.GetTempPath(), "fieldops-test-keyring");
+        }
         if (settings is not null)
         {
             foreach (var setting in settings)

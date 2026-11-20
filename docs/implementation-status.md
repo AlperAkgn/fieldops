@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 2026-11-16 (Europe/Istanbul).
+Last updated: 2026-11-20 (Europe/Istanbul).
 
 ## Authorization boundary
 
@@ -30,7 +30,7 @@ The revalidation superseded the historical first-run table below. The audit reco
 | 4 | Implemented, native validation deferred | Technician mobile workflows |
 | 5 | Implemented, native validation deferred | Offline-first synchronization |
 | 6 | Complete, native validation deferred | Real-time, notifications, attachments, scheduling, analytics |
-| 7 | Not Started | Quality and hardening |
+| 7 | Implemented, hosted CI recheck pending | Quality and hardening |
 | 8 | Not Started | Portfolio and release preparation |
 
 ## Phase 0 — Foundation and architecture
@@ -244,15 +244,22 @@ Phase 3 was subsequently authorized and implemented against these APIs. [Phase 2
 - The follow-up audit confirmed the focus fix and found a dropped Save click. Edit Save and Apply checklist now use the aggregate write lock during submission. The final web verification passed Linux lint, strict typecheck, formatting, production build, 62 Vitest cases and two separate 17/17 Playwright runs against the isolated HTTPS/PostgreSQL/SignalR stack. [Final Save stability fix](phase-6-final-save-stability-fix.md)
 - Earlier Phase 6 verification passed the Release build with zero warnings/errors, 249 backend tests (92 unit, 157 integration, zero skips), 16 focused collaboration/provider cases and EF model match. The isolated HTTPS/PostgreSQL/Mailpit/MinIO stack passed health, private-bucket and migration checks. Mobile passed 70 Vitest, 25 Jest and 10 real API integration tests. A clean Linux install, Expo compatibility, Android/iOS JavaScript exports and Metro smoke passed.
 - Native acceptance: `DEFERRED / NOT VERIFIED`, including camera/gallery, PDF handoff, platform notification delivery and actual push receipts. Hosted CI and production push/storage acceptance remain unverified.
-- **FOCUS REGRESSION: RESOLVED. SAVE REGRESSION: RESOLVED. WEB REGRESSION: PASS. INDEPENDENT RE-AUDIT READINESS: READY. PHASE 7 READINESS: CONDITIONAL.** The targeted Save re-audit and phase authorization are pending.
+- **FOCUS REGRESSION: RESOLVED. SAVE REGRESSION: RESOLVED. WEB REGRESSION: PASS. PHASE 7 READINESS: READY.** The owner confirmed the independent Phase 6 quality gate and authorized Phase 7.
 
 ## Phase 7 — Quality and hardening
 
-- Completed: foundation checks only; no product hardening milestone.
-- Pending: security/tenant/IDOR review, dependency advisories, measured performance/query/index work, OpenTelemetry, error/recovery/accessibility expansion, production separation and operational/backup review.
-- Blockers: product workflows to review/measure and separate authorization.
-- Verification: not run. Plan adversarial security, recovery/E2E/accessibility tests and representative performance evidence.
-- Next steps: resolve measured risks and document remaining release limitations.
+- Implemented hosted proxy, HTTPS, database, SMTP and object-storage trust controls. Added structured and correlated API telemetry, optional OTLP traces and metrics, bounded storage calls, outbox retry and dead-letter state, batched sync reads, work-order read optimization and lazy admin routes.
+- Local verification passed Release build, locked restore, formatting, EF model match, 261 backend tests (169 integration), 62 web Vitest and 17 Edge tests, 70 mobile Vitest, 25 Jest and 10 real API integration scenarios, Expo exports and Metro smoke. The Phase 6 PostgreSQL upgrade preserved the sampled tenant's orders, events and audit history. A controlled MinIO outage recovered with one downloadable file after a retry.
+- Main admin JavaScript measured 452.51 kB after the changes, down from 568.44 kB. Representative HTTPS workloads completed without unexpected errors. The SignalR backlog tail and limited attachment sample remain documented for release testing. NuGet and npm checks found no high or critical package advisories. [Implementation and benchmark evidence](phase-7-results.md)
+- Native acceptance for Phases 4–7 remains `DEFERRED / NOT VERIFIED`. Hosted CI, staging TLS and providers, full image scanning and coordinated database/object/key-ring restore are release checks. Current SignalR fan-out uses one API replica. [Operations](operations.md)
+- Controlled drills verified PostgreSQL readiness recovery, a matching logical restore, private bucket access, and a graceful API restart during an attachment upload with an idempotent retry.
+- The independent audit reported security PASS, observability and reliability FAIL, performance CONDITIONAL and Phase 8 NOT READY. Remediation adds separate upgrade/lifetime metrics, fresh dispatch timestamps, bounded download and readiness responses, a guarded migration downgrade and faster bounded dispatch. It also addresses Edge fixture synchronization and the checklist checkbox race observed during regression testing. [Quality gate remediation](phase-7-quality-gate-remediation.md)
+- Remediation verification passed 266 backend tests, live OTLP, repeated PostgreSQL readiness and isolated restore checks, and the real MinIO streaming/drain drills. SignalR burst p95 went from 5,334.21 ms to 487.36 ms for the matched 160-event run. The two targeted Edge regressions passed, with full Edge verification tracked in the remediation report.
+- The independent re-audit closed P7-01, P7-02, P7-03, P7-05, P7-06 and P7-07. Final remediation resolved P7-04 by arming the existing HTTP budget before routing. It passed two full runs of 267 backend tests, all 17 Edge scenarios and 62 web Vitest cases. P7-09 resolved after updating six published Expo SDK 58 patch releases. A clean install passed Expo compatibility, Doctor 20/20, Android/iOS JavaScript exports and Metro smoke, plus 70 mobile Vitest, 25 Jest and 10 live API integration tests.
+- **P7-08: RESOLVED. DEPENDENCY SECURITY GATE: PASS locally.** On 2026-11-20 the official advisory/API confirmed withdrawal on 2026-11-18 and an update on 2026-11-19. The existing `npm audit --audit-level=high` command exited 0. Full and production-classified audits contain zero High/Critical findings and respectively 30 and 3 Moderate entries, with exit 1 for those Moderate findings. The withdrawn advisory is absent. Dependency files and the audit gate were preserved. [Current CI remediation](phase-7-hosted-ci-remediation.md) · [Historical P7-08 decision](phase-7-picomatch-decision.md)
+- Hosted run `44193183423` failed the web audit before the withdrawal and finished the Docker browser suite 16/17 after healthy services and successful migration/authentication smoke. Its checklist test held the newest event while an older event could refetch the newer order version and cause a local conflict with no Pause POST. The local diagnostic reproduced that timeout. The fixture now gates detail reads during the real API 409 and verifies draft preservation, explicit Reload and versioned Pause recovery. Verification passed the isolated checklist, six related scenarios, two independent full Edge runs of **17/17** (4.0 and 4.1 minutes, zero retries/skips), **62 web Vitest tests**, lint, strict typecheck, formatting and production build. The isolated Compose project passed readiness, migration reapply, normal-limit trusted HTTPS/CORS/CSRF/SMTP/429 smoke and **10 mobile HTTP integration tests**. Original hosted trace/screenshot files were not uploaded and are unavailable. [Current evidence](phase-7-hosted-ci-remediation.md)
+- **WEB CI: BLOCKED pending hosted recheck. DOCKER CI: BLOCKED pending hosted recheck. PHASE 7 HOSTED CI RECHECK READINESS: READY.** Local verification is complete. The last hosted web and Docker jobs remain failed until a new run evaluates the correction.
+- **PHASE 8 READINESS: NOT READY.** A new hosted run and the independent Phase 7 decision remain pending.
 
 ## Phase 8 — Portfolio and release preparation
 

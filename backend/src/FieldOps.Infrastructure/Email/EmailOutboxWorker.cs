@@ -1,3 +1,4 @@
+using FieldOps.Application.Common;
 using FieldOps.Application.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -20,6 +21,7 @@ internal sealed class EmailOutboxWorker(IServiceScopeFactory scopes, ILogger<Ema
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception exception)
             {
+                FieldOpsTelemetry.Record("email.worker", "failed");
                 logger.LogWarning("Email dispatcher is unavailable with {FailureType}", exception.GetType().Name);
             }
         }

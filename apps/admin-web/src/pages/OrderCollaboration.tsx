@@ -109,7 +109,7 @@ export function OrderCollaboration({
                   <input
                     type="checkbox"
                     checked={item.isCompleted}
-                    disabled={!execute || terminal || action.busy}
+                    disabled={!execute || terminal || action.writing}
                     onChange={(event) =>
                       action.mutate({
                         path: `${root}/checklist/${item.id}`,
@@ -282,7 +282,7 @@ export function OrderCollaboration({
             <div className="comment-compose">
               <Form
                 key={
-                  action.submittedAt && !action.busy && action.isSuccess
+                  action.submittedAt && !action.writing && action.isSuccess
                     ? action.submittedAt
                     : 'compose'
                 }
@@ -310,7 +310,7 @@ export function OrderCollaboration({
                   })
                 }
                 error={undefined}
-                pending={action.busy}
+                pending={action.writing}
                 submitLabel="Post comment"
               />
             </div>

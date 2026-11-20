@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.S3.Model;
@@ -16,9 +17,11 @@ internal sealed class S3AttachmentStorage(IConfiguration configuration) : IAttac
 
     public async Task PutAsync(string key, Stream content, string contentType, CancellationToken cancellationToken)
     {
+        using var operation = FieldOpsTelemetry.Activities.StartActivity("storage.put", ActivityKind.Client);
+        using var deadline = Bound(cancellationToken);
         try
         {
-            await EnsureLocalBucketAsync(cancellationToken);
+            await EnsureLocalBucketAsync(deadline.Token);
             await client.Value.PutObjectAsync(new PutObjectRequest
             {
                 BucketName = bucket,
@@ -29,9 +32,15 @@ internal sealed class S3AttachmentStorage(IConfiguration configuration) : IAttac
                 DisableDefaultChecksumValidation = false,
                 UseChunkEncoding = false,
                 ChecksumAlgorithm = ChecksumAlgorithm.SHA256
-            }, cancellationToken);
+            }, deadline.Token);
+            FieldOpsTelemetry.Record("storage.put", "ok");
         }
-        catch (Exception error) when (IsProviderFailure(error, cancellationToken)) { throw Unavailable(); }
+        catch (Exception error) when (IsProviderFailure(error, cancellationToken))
+        {
+            FieldOpsTelemetry.Record("storage.put", "failed");
+            operation?.SetStatus(ActivityStatusCode.Error);
+            throw Unavailable();
+        }
     }
 
     private async Task EnsureLocalBucketAsync(CancellationToken cancellationToken)
@@ -50,18 +59,44 @@ internal sealed class S3AttachmentStorage(IConfiguration configuration) : IAttac
 
     public async Task<(Stream Stream, IDisposable Owner)> GetAsync(string key, CancellationToken cancellationToken)
     {
+        using var operation = FieldOpsTelemetry.Activities.StartActivity("storage.get", ActivityKind.Client);
+        using var deadline = Bound(cancellationToken);
         try
         {
-            var response = await client.Value.GetObjectAsync(bucket, key, cancellationToken);
+            var response = await client.Value.GetObjectAsync(bucket, key, deadline.Token);
+            FieldOpsTelemetry.Record("storage.get", "ok");
             return (response.ResponseStream, response);
         }
-        catch (Exception error) when (IsProviderFailure(error, cancellationToken)) { throw Unavailable(); }
+        catch (Exception error) when (IsProviderFailure(error, cancellationToken))
+        {
+            FieldOpsTelemetry.Record("storage.get", "failed");
+            operation?.SetStatus(ActivityStatusCode.Error);
+            throw Unavailable();
+        }
     }
 
     public async Task DeleteAsync(string key, CancellationToken cancellationToken)
     {
-        try { await client.Value.DeleteObjectAsync(bucket, key, cancellationToken); }
-        catch (Exception error) when (IsProviderFailure(error, cancellationToken)) { throw Unavailable(); }
+        using var operation = FieldOpsTelemetry.Activities.StartActivity("storage.cleanup", ActivityKind.Client);
+        using var deadline = Bound(cancellationToken);
+        try
+        {
+            await client.Value.DeleteObjectAsync(bucket, key, deadline.Token);
+            FieldOpsTelemetry.Record("storage.cleanup", "ok");
+        }
+        catch (Exception error) when (IsProviderFailure(error, cancellationToken))
+        {
+            FieldOpsTelemetry.Record("storage.cleanup", "failed");
+            operation?.SetStatus(ActivityStatusCode.Error);
+            throw Unavailable();
+        }
+    }
+
+    private static CancellationTokenSource Bound(CancellationToken cancellationToken)
+    {
+        var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(8));
+        return deadline;
     }
 
     private static bool IsProviderFailure(Exception error, CancellationToken cancellationToken) =>

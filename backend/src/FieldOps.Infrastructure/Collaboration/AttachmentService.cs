@@ -97,7 +97,7 @@ internal sealed class AttachmentService(FieldOpsDbContext db, OperationalWriteCo
     }
 
     private static bool SafeName(string name) => !string.IsNullOrWhiteSpace(name) && name.Length <= 160 &&
-        name is not "." and not ".." && !name.Any(character => char.IsControl(character) || character is '/' or '\\' or ':' ||
+        name.Trim() is not "." and not ".." && !name.Any(character => char.IsControl(character) || character is '/' or '\\' or ':' ||
             char.GetUnicodeCategory(character) == System.Globalization.UnicodeCategory.Format);
 
     private static async Task<string> CopyValidatedAsync(Stream source, Stream target, string contentType, CancellationToken cancellationToken)

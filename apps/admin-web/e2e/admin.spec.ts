@@ -81,7 +81,8 @@ async function signIn(page: Page, email: string, organization?: string) {
       (response) => response.url().endsWith('/select') && response.request().method() === 'POST',
     );
     await page.getByLabel('Active organization').selectOption(organization);
-    await selected;
+    expect((await selected).ok()).toBe(true);
+    await expect(page.getByLabel('Active organization')).toHaveValue(organization);
     await expect(page.getByLabel('Active organization')).toBeEnabled();
   }
   await expect(page.locator('main#main h1')).toBeVisible();
@@ -123,14 +124,20 @@ async function controlOrderEvents(page: Page) {
   };
 }
 
-async function controlDetailResponses(page: Page, path: string) {
+async function controlDetailResponses(
+  page: Page,
+  path: string,
+  onStatus?: (status: number) => void,
+) {
   let paused: Promise<void> | undefined;
   await page.route(
     (url) => url.pathname === `/api/v1${path}`,
     async (route) => {
       if (route.request().method() !== 'GET') return route.fallback();
+      const gate = paused;
       const response = await route.fetch();
-      await paused;
+      onStatus?.(response.status());
+      await gate;
       await route.fulfill({ response });
     },
   );
@@ -147,6 +154,8 @@ async function controlDetailResponses(page: Page, path: string) {
 }
 test.beforeAll(async () => {
   setup = await request.newContext({ ignoreHTTPSErrors: true });
+  const readiness = await setup.get(`${apiOrigin}/health/ready`);
+  expect(readiness.ok(), 'PostgreSQL-backed API is ready before fixture setup').toBe(true);
   accounts = {
     owner: await account('owner'),
     manager: await account('manager'),
@@ -501,27 +510,23 @@ for (const conflict of [false, true]) {
     );
     const path = `/work-orders/${order.id}`;
     const changedTitle = 'Updated by the independent owner session';
-    let started = false;
-    let forwardChange: (() => void) | undefined;
     await signIn(page, manager.email, owner.tenantId);
-    const pauseReads = conflict ? await controlDetailResponses(page, path) : undefined;
-    await page.routeWebSocket('**/api/v1/live?*', (socket) => {
-      socket.connectToServer().onMessage((message) => {
-        const frame = message.toString();
-        if (
-          frame.includes('"target":"OrderChanged"') &&
-          frame.includes(order.id) &&
-          frame.includes(`"version":${order.version + 1}`)
-        ) {
-          forwardChange = () => socket.send(message);
-          return;
-        }
-        socket.send(message);
-        if (frame === '{}\u001e') started = true;
-      });
-    });
+    const live = await controlOrderEvents(page);
+    const renderedDetail = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === `/api/v1${path}` &&
+        response.request().method() === 'GET',
+    );
     await page.goto(path);
-    await expect.poll(() => started).toBe(true);
+    const initial = await renderedDetail;
+    expect(initial.status(), 'Initial authorized order detail before intercepting refreshes').toBe(
+      200,
+    );
+    expect((await initial.json()).order.id).toBe(order.id);
+    await expect(page.getByRole('heading', { name: order.title, exact: true })).toBeVisible();
+    await live.ready();
+    const pauseReads = conflict ? await controlDetailResponses(page, path) : undefined;
+    const forwardChange = live.hold(order);
     const edit = page.getByRole('button', { name: 'Edit work order', exact: true });
     const modal = page.getByRole('dialog', { name: 'Edit work order', exact: true });
     await expect(edit).toBeEnabled();
@@ -540,7 +545,6 @@ for (const conflict of [false, true]) {
         'PATCH',
       );
       updatedVersion = updated.version;
-      await expect.poll(() => !!forwardChange).toBe(true);
       if (conflict) {
         const rejected = page.waitForResponse(
           (response) => response.url().endsWith(path) && response.request().method() === 'PATCH',
@@ -572,7 +576,7 @@ for (const conflict of [false, true]) {
       await route.fulfill({ response });
     });
     try {
-      forwardChange!();
+      await forwardChange();
       await expect.poll(() => responseStatus).toBe(200);
       expect(
         await edit.evaluate((button) => ({
@@ -821,7 +825,23 @@ test('manager completes real customer → asset → scheduled/assigned work and 
     .selectOption({ label: `AHU-${suffix} · Air handling unit` });
   await dialog.getByRole('button', { name: 'Create work order', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Inspect ventilation system' })).toBeVisible();
-  await page.getByRole('button', { name: 'Schedule work order', exact: true }).click();
+  const detailPath = new URL(page.url()).pathname;
+  let scheduleReadStatus = 0;
+  const pauseScheduleRead = await controlDetailResponses(page, detailPath, (status) => {
+    scheduleReadStatus = status;
+  });
+  const finishScheduleRead = pauseScheduleRead();
+  try {
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect.poll(() => scheduleReadStatus).toBe(200);
+    const schedule = page.getByRole('button', { name: 'Schedule work order', exact: true });
+    await expect(schedule).toBeEnabled();
+    await schedule.click();
+    await expect(dialog.getByLabel('Planned start', { exact: false })).toBeVisible();
+  } finally {
+    finishScheduleRead();
+    await page.unrouteAll({ behavior: 'wait' });
+  }
   await dialog.getByLabel('Planned start', { exact: false }).fill('2027-01-10T10:00');
   await dialog.getByLabel('Planned end', { exact: false }).fill('2027-01-10T11:00');
   await dialog.getByRole('button', { name: 'Save schedule' }).click();
@@ -850,7 +870,6 @@ test('manager completes real customer → asset → scheduled/assigned work and 
   const template = page.getByRole('combobox', { name: /^Checklist template/ });
   await template.selectOption({ label: 'Ventilation inspection' });
   const apply = page.locator('form').filter({ has: template }).locator('button[type="submit"]');
-  const detailPath = new URL(detailUrl).pathname;
   let finishChecklistRead: () => void = () => undefined;
   const checklistRead = new Promise<void>((resolve) => {
     finishChecklistRead = resolve;
@@ -1217,6 +1236,16 @@ test('checklist writes synchronize fast actions, preserve real conflicts and rec
   page,
 }) => {
   const source = (await call('/work-orders?pageSize=1', undefined, manager.tokens, 'GET')).items[0];
+  const refreshSource = await call(
+    '/work-orders',
+    {
+      customerId: source.customerId,
+      serviceLocationId: source.serviceLocationId,
+      title: 'Independent checklist refresh',
+      priority: 'High',
+    },
+    manager.tokens,
+  );
   const tech = (await call('/technicians', undefined, manager.tokens, 'GET')).items[0];
   let order = await call(
     '/work-orders',
@@ -1263,7 +1292,9 @@ test('checklist writes synchronize fast actions, preserve real conflicts and rec
     manager.tokens,
   );
   await signIn(page, manager.email, owner.tenantId);
+  const live = await controlOrderEvents(page);
   await page.goto(`/work-orders/${order.id}`);
+  await live.ready();
   let hold = false;
   let waiting = false;
   let release: () => void = () => undefined;
@@ -1313,7 +1344,32 @@ test('checklist writes synchronize fast actions, preserve real conflicts and rec
   hold = false;
   release();
   await expect(start).toBeEnabled();
-  await checkbox.click();
+  await expect(checkbox).toBeChecked();
+
+  // A committed event can refresh the order without changing the displayed checklist or its version.
+  const forwardRefresh = live.hold(refreshSource);
+  defer();
+  try {
+    await call(
+      `/work-orders/${refreshSource.id}`,
+      { expectedVersion: refreshSource.version, description: 'Refresh the workspace queries' },
+      owner,
+      'PATCH',
+    );
+    await forwardRefresh();
+    await expect.poll(() => waiting).toBe(true);
+    await expect(checkbox).toBeEnabled();
+    const saved = page.waitForResponse(
+      (response) =>
+        response.url().includes(`/work-orders/${order.id}/checklist/`) &&
+        response.request().method() === 'PATCH',
+    );
+    await checkbox.click();
+    expect((await saved).status()).toBe(200);
+  } finally {
+    hold = false;
+    release();
+  }
   await expect(start).toBeEnabled();
   await expect(checkbox).not.toBeChecked();
   await checkbox.click();
@@ -1324,24 +1380,50 @@ test('checklist writes synchronize fast actions, preserve real conflicts and rec
       .filter((write) => write.path.includes('/checklist/') && !write.path.endsWith('/apply'))
       .map((write) => write.expectedVersion),
   ).toEqual([5, 6, 7]);
+  // An earlier committed event can arrive after the owner makes the next change.
+  const forwardStartChange = live.hold(order, 9);
   await start.click();
   await page.getByRole('button', { name: 'Confirm start' }).click();
   await expect(page.locator('.page-header .badge')).toHaveText('In Progress');
   expect(writes.find((write) => write.path.endsWith('/start'))?.expectedVersion).toBe(8);
   await page.getByRole('button', { name: 'Pause work order', exact: true }).click();
-  await call(
-    `/work-orders/${order.id}`,
-    { expectedVersion: 9, description: 'Changed by organization owner' },
-    owner,
-    'PATCH',
-  );
-  await page.getByRole('button', { name: 'Confirm pause' }).click();
-  await expect(page.getByRole('dialog').getByRole('alert')).toContainText(/changed|version/i);
-  expect(writes.filter((write) => write.path.endsWith('/pause'))).toHaveLength(1);
+  const pauseDialog = page.getByRole('dialog', { name: 'Pause work order?' });
+  await pauseDialog.getByLabel('Reason', { exact: true }).fill('Pause draft must survive');
+  const forwardOwnerChange = live.hold(order, 10);
+  // Keep every detail refresh behind the conflict, including one triggered by the older event.
+  defer();
+  try {
+    await call(
+      `/work-orders/${order.id}`,
+      { expectedVersion: 9, description: 'Changed by organization owner' },
+      owner,
+      'PATCH',
+    );
+    await forwardStartChange();
+    await expect.poll(() => waiting).toBe(true);
+    await expect(page.getByText(/Version 9/)).toBeVisible();
+    const rejected = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/work-orders/${order.id}/pause`) &&
+        response.request().method() === 'POST',
+    );
+    await expect(pauseDialog.getByRole('button', { name: 'Confirm pause' })).toBeEnabled();
+    await pauseDialog.getByRole('button', { name: 'Confirm pause' }).click();
+    expect((await rejected).status()).toBe(409);
+    await expect(pauseDialog.getByRole('alert')).toContainText(/changed|version/i);
+    await expect(pauseDialog.getByLabel('Reason', { exact: true })).toHaveValue(
+      'Pause draft must survive',
+    );
+    expect(writes.filter((write) => write.path.endsWith('/pause'))).toHaveLength(1);
+  } finally {
+    hold = false;
+    release();
+  }
   await page.getByRole('button', { name: 'Reload current work order' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByText(/Version 10/)).toBeVisible();
   await expect(page.getByText('Changed by organization owner', { exact: true })).toBeVisible();
+  await forwardOwnerChange();
   await page.getByRole('button', { name: 'Pause work order', exact: true }).click();
   await page.getByRole('button', { name: 'Confirm pause' }).click();
   await expect(page.locator('.page-header .badge')).toHaveText('On Hold');
